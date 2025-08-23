@@ -512,6 +512,24 @@ export default {
     try { this.fetchMaterials() } catch(e) { console.warn(e) }
   },
   methods: {
+    // Создает короткий осмысленный заголовок из транскрипта
+    makeShortTitle(text) {
+      if (!text || typeof text !== 'string') return 'Untitled note'
+      // Убираем переносы/дублирующиеся пробелы
+      let s = text.replace(/\r/g, ' ').replace(/\n/g, ' ').split(/\s+/).join(' ').trim()
+      if (!s) return 'Untitled note'
+      // Режем по первому разделителю предложения
+      const m = s.match(/(.+?[\.\!\?])\s|(.+?$)/)
+      s = (m && (m[1] || m[2]) || s).trim()
+      // Ограничиваем до 7 слов
+      const words = s.split(/\s+/)
+      if (words.length > 7) s = words.slice(0, 7).join(' ')
+      // Ограничиваем длину до 60 символов, убираем хвостовые знаки
+      if (s.length > 60) s = s.slice(0, 60).trim().replace(/[\,\.;:\-\s]+$/, '')
+      // Убираем крайние кавычки/скобки
+      s = s.replace(/^["'\(\[]+|["'\)\]]+$/g, '').trim()
+      return s || 'Untitled note'
+    },
     logout(){
       try { localStorage.removeItem('token'); localStorage.removeItem('user') } catch(e){}
       this.user = null
@@ -533,8 +551,7 @@ export default {
         // Map backend materials to dashboard notes list
         const mapped = list.map(m => {
           const transcript = m.transcript || ''
-          const firstLine = (transcript.split('\n')[0] || '').trim()
-          const title = firstLine || 'Untitled note'
+          const title = this.makeShortTitle(m.title || transcript)
           const updated = m.updatedAt || m.updated_at || m.updated || m.createdAt || m.created_at || Date.now()
           return {
             id: m.id || m._id,

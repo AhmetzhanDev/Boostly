@@ -294,7 +294,13 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	systemPrompt := strings.Join([]string{
 		"You convert transcripts into study materials.",
 		"RULES:",
-		// ...
+		"- Output JSON only with fields: {\"flashcards\": Flashcard[], \"quiz\": QuizQuestion[]}",
+		"- Flashcard: {term, definition, example?}",
+		"- QuizQuestion: {id?, type, question, options?, answer?, correct?, pairs?, rationale?, difficulty?, citation?}",
+		"- Prefer concise, clear Russian if transcript is Russian; otherwise use transcript language.",
+		"- Provide at least 3 flashcards and at least 3 quiz questions even for short transcripts (use generic but relevant basics if needed).",
+		"- Balance quiz types across TF/MCQ/SHORT where possible; include rationale when feasible.",
+		"- Keep answers short; options 2-5 items.",
 	}, "\n")
 
 	userPrompt := fmt.Sprintf(
@@ -368,19 +374,119 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 
 	var payload GeneratePayload
 	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payload); err != nil {
-		clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
-		clean = strings.TrimPrefix(clean, "```json")
-		clean = strings.TrimPrefix(clean, "```")
-		clean = strings.TrimSuffix(clean, "```")
-		clean = strings.TrimSpace(clean)
-		if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
-			log.Printf("[handleGenerateAndSave] Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid JSON from model"})
-			return
-		}
+        clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+        clean = strings.TrimPrefix(clean, "```json")
+        clean = strings.TrimPrefix(clean, "```")
+        clean = strings.TrimSuffix(clean, "```")
+        clean = strings.TrimSpace(clean)
+        if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
+            // Попытка 3: извлечь JSON по первым и последним фигурным скобкам
+            raw := openaiResp.Choices[0].Message.Content
+            i := strings.Index(raw, "{")
+            j := strings.LastIndex(raw, "}")
+            parsed := false
+            if i >= 0 && j > i {
+                candidate := strings.TrimSpace(raw[i : j+1])
+                // Нормализация известных нестандартных ключей от модели
+                candidate = strings.ReplaceAll(candidate, "\"example?\"", "\"example\"")
+                if err3 := json.Unmarshal([]byte(candidate), &payload); err3 == nil {
+                    log.Printf("[handleGenerateAndSave] Parsed AI JSON via brace-extract normalization")
+                    parsed = true
+                } else {
+                    log.Printf("[handleGenerateAndSave] Unmarshal failed after brace-extract: %v", err3)
+                }
+            }
+            if !parsed {
+                // Не валидный JSON: фиксируем и переходим к бэкенд-фоллбеку ниже
+                log.Printf("[handleGenerateAndSave] Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
+            }
+        }
+    }
+
+	// Ensure non-nil slices
+	if payload.Flashcards == nil {
+		payload.Flashcards = []Flashcard{}
 	}
+	if payload.Quiz == nil {
+		payload.Quiz = []QuizQuestion{}
+	}
+
+	// Фоллбек: если модель вернула пустые массивы — синтезируем минимум 3 карточки и 3 вопроса из транскрипта
+	if len(payload.Flashcards) == 0 && len(payload.Quiz) == 0 {
+		text := strings.TrimSpace(reqBody.Transcript)
+		low := strings.ToLower(text)
+		wordsArr := strings.Fields(low)
+		trimPunct := func(s string) string { return strings.Trim(s, ".,!?:;\"'()[]{}<>«»—-") }
+		stop := map[string]struct{}{
+			"и": {}, "в": {}, "во": {}, "на": {}, "что": {}, "это": {}, "как": {}, "к": {}, "из": {}, "по": {},
+			"а": {}, "но": {}, "ли": {}, "да": {}, "не": {}, "ни": {}, "для": {}, "о": {}, "от": {}, "до": {},
+			"the": {}, "a": {}, "an": {}, "to": {}, "of": {}, "in": {}, "on": {}, "is": {}, "are": {}, "with": {},
+		}
+		freq := map[string]int{}
+		for _, w := range wordsArr {
+			w = trimPunct(w)
+			if len(w) < 3 { continue }
+			if _, ok := stop[w]; ok { continue }
+			freq[w]++
+		}
+		// выбрать до 3 наиболее частых слов без сортировки
+		pickMax := func(m map[string]int) string {
+			best := ""
+			bestN := 0
+			for k, n := range m {
+				if n > bestN || (n == bestN && len(k) > len(best)) {
+					best, bestN = k, n
+				}
+			}
+			if best != "" { delete(m, best) }
+			return best
+		}
+		termsSel := []string{}
+		for i := 0; i < 3; i++ {
+			w := pickMax(freq)
+			if w == "" { break }
+			termsSel = append(termsSel, w)
+		}
+		if len(termsSel) == 0 {
+			termsSel = []string{"основы", "тема", "ключевой пункт"}
+		}
+		// флэшкарты
+		fallbackCards := make([]Flashcard, 0, 3)
+		for _, t := range termsSel {
+			fallbackCards = append(fallbackCards, Flashcard{
+				Term:       t,
+				Definition: "Ключевой термин из транскрипта; уточните детали по контексту.",
+				Example:    fmt.Sprintf("В тексте упоминается ‘%s’.", t),
+			})
+			if len(fallbackCards) >= 3 { break }
+		}
+		// вопросы True/False
+		fallbackQuiz := make([]QuizQuestion, 0, 3)
+		for _, t := range termsSel {
+			q := QuizQuestion{
+				Type:      "TF",
+				Question:  fmt.Sprintf("В транскрипте упоминается ‘%s’?", t),
+				Options:   []string{"True", "False"},
+				Answer:    "True",
+				Difficulty: "easy",
+			}
+			fallbackQuiz = append(fallbackQuiz, q)
+			if len(fallbackQuiz) >= 3 { break }
+		}
+		if len(fallbackQuiz) == 0 {
+			fallbackQuiz = []QuizQuestion{
+				{Type: "TF", Question: "Транскрипт содержит приветствие?", Options: []string{"True", "False"}, Answer: "True", Difficulty: "easy"},
+				{Type: "TF", Question: "Упоминается конкретная тема?", Options: []string{"True", "False"}, Answer: "True", Difficulty: "easy"},
+				{Type: "TF", Question: "Это короткий фрагмент без подробностей?", Options: []string{"True", "False"}, Answer: "True", Difficulty: "easy"},
+			}
+		}
+		payload.Flashcards = fallbackCards
+		payload.Quiz = fallbackQuiz
+		log.Printf("[handleGenerateAndSave] fallback used: flashcards=%d quiz=%d", len(payload.Flashcards), len(payload.Quiz))
+	}
+
+	// Diagnostics: log generation counts
+	log.Printf("[handleGenerateAndSave] generated: flashcards=%d quiz=%d", len(payload.Flashcards), len(payload.Quiz))
 
 	// Сохраняем материал в MongoDB с привязкой к пользователю
 	material := Material{
@@ -391,24 +497,37 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
+	log.Printf("[handleGenerateAndSave] inserting material: user=%s flashcards=%d quiz=%d", userID.Hex(), len(payload.Flashcards), len(payload.Quiz))
 	collection := client.Database("speakapper").Collection("materials")
-	result, err := collection.InsertOne(context.Background(), material)
+	ctxIns, cancelIns := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelIns()
+	startIns := time.Now()
+	result, err := collection.InsertOne(ctxIns, material)
 	if err != nil {
 		log.Printf("[handleGenerateAndSave] Error saving material: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to save material"})
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to save material", "error": err.Error()})
 		return
 	}
+	log.Printf("[handleGenerateAndSave] inserted material _id=%v (type=%T) in %s", result.InsertedID, result.InsertedID, time.Since(startIns))
 	material.ID = result.InsertedID.(primitive.ObjectID)
 
 	w.Header().Set("Content-Type", "application/json")
+	// Guard against null slices in JSON
+	respFlash := material.Flashcards
+	if respFlash == nil {
+		respFlash = []Flashcard{}
+	}
+	respQuiz := material.Quiz
+	if respQuiz == nil {
+		respQuiz = []QuizQuestion{}
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":  true,
-		"material": material,
-		// дублируем для удобства фронтенда
-		"flashcards": material.Flashcards,
-		"quiz":       material.Quiz,
+		"success":    true,
+		"material":   material,
+		"flashcards": respFlash,
+		"quiz":       respQuiz,
 	})
 }
 
@@ -497,7 +616,19 @@ func getMaterialByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "material": mat})
+	ff := mat.Flashcards
+	if ff == nil { ff = []Flashcard{} }
+	qq := mat.Quiz
+	if qq == nil { qq = []QuizQuestion{} }
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "material": map[string]interface{}{
+		"id": mat.ID,
+		"user_id": mat.UserID,
+		"transcript": mat.Transcript,
+		"flashcards": ff,
+		"quiz": qq,
+		"created_at": mat.CreatedAt,
+		"updated_at": mat.UpdatedAt,
+	}})
 }
 
 // SignupRequest представляет запрос на регистрацию
@@ -607,7 +738,7 @@ type QuizQuestion struct {
 	Question   string     `json:"question"`
 	Options    []string   `json:"options,omitempty"`    // MCQ/MSQ/TF/CLOZE
 	Answer     string     `json:"answer,omitempty"`     // Верный ответ для MCQ/TF/SHORT/CLOZE
-	Correct    []string   `json:"correct,omitempty"`    // Верные ответы для MSQ
+	Correct    interface{} `json:"correct,omitempty"`    // Может быть bool (TF/MCQ) или []string (MSQ)
 	Pairs      [][]string `json:"pairs,omitempty"`      // MATCHING: массив пар [[left,right], ...]
 	Rationale  string     `json:"rationale,omitempty"`  // Объяснение
 	Difficulty string     `json:"difficulty,omitempty"` // easy|medium|hard
@@ -690,11 +821,15 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 		// Convert ObjectIDs to strings for JSON response
 		var responseMaterials []map[string]interface{}
 		for _, mat := range materials {
+			f := mat.Flashcards
+			if f == nil { f = []Flashcard{} }
+			q := mat.Quiz
+			if q == nil { q = []QuizQuestion{} }
 			responseMaterials = append(responseMaterials, map[string]interface{}{
 				"id":         mat.ID.Hex(),
 				"transcript": mat.Transcript,
-				"flashcards": mat.Flashcards,
-				"quiz":       mat.Quiz,
+				"flashcards": f,
+				"quiz":       q,
 				"created_at": mat.CreatedAt,
 				"updated_at": mat.UpdatedAt,
 			})
@@ -720,6 +855,10 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default nil to empty slices
+	if materialData.Flashcards == nil { materialData.Flashcards = []Flashcard{} }
+	if materialData.Quiz == nil { materialData.Quiz = []QuizQuestion{} }
+
 	// Create material
 	material := Material{
 		UserID:     userID,
@@ -731,13 +870,18 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save to MongoDB
+	log.Printf("[handleMaterials:POST] inserting material: user=%s flashcards=%d quiz=%d", userID.Hex(), len(material.Flashcards), len(material.Quiz))
 	collection := client.Database("speakapper").Collection("materials")
-	result, err := collection.InsertOne(context.Background(), material)
+	ctxIns, cancelIns := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelIns()
+	startIns := time.Now()
+	result, err := collection.InsertOne(ctxIns, material)
 	if err != nil {
-		log.Printf("Error saving material: %v", err)
+		log.Printf("[handleMaterials:POST] Error saving material: %v", err)
 		http.Error(w, "Failed to save material", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("[handleMaterials:POST] inserted material _id=%v (type=%T) in %s", result.InsertedID, result.InsertedID, time.Since(startIns))
 
 	// Set the ID from the inserted document
 	material.ID = result.InsertedID.(primitive.ObjectID)
@@ -1201,6 +1345,9 @@ func main() {
 		log.Fatal("❌ Ошибка подключения к MongoDB:", err)
 	}
 	defer DisconnectDB()
+	if database != nil {
+		log.Printf("✅ Mongo database selected: %s", database.Name())
+	}
 	r := mux.NewRouter()
 
 	// Настройка CORS

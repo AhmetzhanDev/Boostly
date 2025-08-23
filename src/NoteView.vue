@@ -2,7 +2,7 @@
   <div class="note-wrap">
     <header class="nv-topbar">
       <button class="back" @click="$router.push('/dashboard')" aria-label="Back">← Back</button>
-      <div class="title">{{ note?.title || 'Note' }}</div>
+      <div style="flex:1"></div>
       <div style="width:72px"></div>
     </header>
 
@@ -19,7 +19,6 @@
 
     <!-- Loading skeletons -->
     <section v-if="loading" class="content">
-      <div class="skeleton title"></div>
       <div class="skeleton line"></div>
       <div class="skeleton line w60"></div>
       <div class="skeleton block"></div>
@@ -238,11 +237,21 @@ export default {
     // Если id не валиден как Mongo ObjectID (24 hex), не дергаем API
     const isHex24 = /^[a-fA-F0-9]{24}$/.test(id)
     if (!isHex24) {
+      // Инициализируем квиз из локальной заметки, если она есть
+      if (this.note && Array.isArray(this.note.quiz)) {
+        this.quizList = this.normalizeQuiz(this.note.quiz || [])
+        this.resetQuiz()
+      }
       this.loading = false
       return
     }
     // Показываем снапшот сразу, но обновляем с бэкенда при валидном id
     this.loading = !this.note
+    // Если уже есть снапшот – подхватим квиз немедленно (лучший UX)
+    if (this.note && Array.isArray(this.note.quiz)) {
+      this.quizList = this.normalizeQuiz(this.note.quiz || [])
+      this.resetQuiz()
+    }
     this.fetchMaterialById(id).catch(err => {
       console.warn('Fetch material failed', err)
       // Если данных нет вообще — возвращаемся
@@ -251,6 +260,38 @@ export default {
     })
   },
   methods: {
+    normalizeQuiz(list) {
+      try {
+        const out = []
+        ;(list || []).forEach((q) => {
+          if (!q || typeof q !== 'object') return
+          const type = (q.type || q.Type || '').toUpperCase()
+          let options = Array.isArray(q.options) ? q.options.slice() : []
+          let answer = q.answer
+          let correct = Array.isArray(q.correct) ? q.correct.slice() : undefined
+
+          // Нормализуем True/False
+          if (type === 'TF' && options.length === 0) {
+            options = ['True', 'False']
+          }
+
+          // Оставляем только поддерживаемые типы с вариантами ответов
+          const hasVariants = Array.isArray(options) && options.length > 0
+          const hasAnswer = (answer !== undefined && answer !== null && answer !== '') || (Array.isArray(correct) && correct.length > 0)
+          if (!hasVariants || !hasAnswer) return
+
+          // Возвращаем унифицированный объект
+          out.push({
+            question: q.question || q.q || '',
+            options,
+            answer,
+            correct,
+            rationale: q.rationale || ''
+          })
+        })
+        return out
+      } catch(_){ return Array.isArray(list) ? list : [] }
+    },
     async fetchMaterialById(id) {
       const token = localStorage.getItem('token')
       if (!token) throw new Error('No JWT')
@@ -278,7 +319,7 @@ export default {
       sessionStorage.setItem('note:'+this.note.id, JSON.stringify(this.note))
       this.loading = false
       // init quiz
-      this.quizList = (this.note.quiz || []).slice()
+      this.quizList = this.normalizeQuiz(this.note.quiz || [])
       this.resetQuiz()
     },
     resetQuiz() {
