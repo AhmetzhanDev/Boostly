@@ -38,7 +38,7 @@
     <!-- Single expanding side pane -->
     <aside class="navpane" :class="{ open: sidebarOpen }" @click.self="profileMenu=false">
       <div v-if="sidebarOpen" class="pane-head">
-        <div class="pane-logo">SpeakApperAI</div>
+        <div class="pane-logo">Boostly</div>
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="theme-toggle" @click="toggleTheme" :aria-label="theme==='dark' ? 'Switch to light theme' : 'Switch to dark theme'">
             <span v-if="theme==='dark'">🌙</span>

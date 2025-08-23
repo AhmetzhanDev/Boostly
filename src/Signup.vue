@@ -28,7 +28,7 @@
     <header class="header">
       <div class="container">
         <div class="logo">
-          <h1>SpeakApper</h1>
+          <h1>Boostly</h1>
         </div>
         <nav class="nav">
           <a href="#" @click="goBack" class="nav-link">Back to Home</a>

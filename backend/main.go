@@ -203,213 +203,213 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 
 // Генерация и сохранение материалов в одну операцию
 func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusMethodNotAllowed)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Method not allowed"})
-        return
-    }
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Method not allowed"})
+		return
+	}
 
-    // Debug: вход в обработчик
-    log.Println("[handleGenerateAndSave] start")
+	// Debug: вход в обработчик
+	log.Println("[handleGenerateAndSave] start")
 
-    // Извлекаем пользователя из JWT
-    authHeader := r.Header.Get("Authorization")
-    if authHeader == "" {
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusUnauthorized)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Authorization header required"})
-        return
-    }
-    tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-    token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-        return jwtSecret, nil
-    })
-    if err != nil || !token.Valid {
-        log.Printf("[handleGenerateAndSave] invalid token: %v", err)
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusUnauthorized)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid token"})
-        return
-    }
-    claims, ok := token.Claims.(jwt.MapClaims)
-    if !ok {
-        log.Println("[handleGenerateAndSave] invalid token claims type")
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusUnauthorized)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid token claims"})
-        return
-    }
-    userIDStr, ok := claims["user_id"].(string)
-    if !ok {
-        // Иногда ObjectID может прийти не строкой — логируем тип для диагностики
-        log.Printf("[handleGenerateAndSave] user_id claim not string, actual=%T value=%v", claims["user_id"], claims["user_id"])
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusUnauthorized)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid user ID in token"})
-        return
-    }
-    userID, err := primitive.ObjectIDFromHex(userIDStr)
-    if err != nil {
-        log.Printf("[handleGenerateAndSave] invalid userID hex: %s error=%v", userIDStr, err)
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusBadRequest)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid user ID format"})
-        return
-    }
-    log.Printf("[handleGenerateAndSave] userID=%s", userID.Hex())
+	// Извлекаем пользователя из JWT
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Authorization header required"})
+		return
+	}
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+	if err != nil || !token.Valid {
+		log.Printf("[handleGenerateAndSave] invalid token: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid token"})
+		return
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		log.Println("[handleGenerateAndSave] invalid token claims type")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid token claims"})
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		// Иногда ObjectID может прийти не строкой — логируем тип для диагностики
+		log.Printf("[handleGenerateAndSave] user_id claim not string, actual=%T value=%v", claims["user_id"], claims["user_id"])
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid user ID in token"})
+		return
+	}
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		log.Printf("[handleGenerateAndSave] invalid userID hex: %s error=%v", userIDStr, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid user ID format"})
+		return
+	}
+	log.Printf("[handleGenerateAndSave] userID=%s", userID.Hex())
 
-    // Читаем тело запроса
-    var reqBody GenerateRequest
-    if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-        log.Printf("[handleGenerateAndSave] decode body error: %v", err)
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusBadRequest)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid request body"})
-        return
-    }
-    if reqBody.Transcript == "" {
-        log.Println("[handleGenerateAndSave] empty transcript")
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusBadRequest)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Transcript is required"})
-        return
-    }
+	// Читаем тело запроса
+	var reqBody GenerateRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		log.Printf("[handleGenerateAndSave] decode body error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid request body"})
+		return
+	}
+	if reqBody.Transcript == "" {
+		log.Println("[handleGenerateAndSave] empty transcript")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Transcript is required"})
+		return
+	}
 
-    // Подсчёт желаемого числа вопросов от объёма текста
-    words := len(strings.Fields(reqBody.Transcript))
-    targetQuiz := 0
-    if words > 0 {
-        targetQuiz = words / 120 // ~1 вопрос на 120 слов
-        if targetQuiz < 6 {
-            targetQuiz = 6
-        }
-        if targetQuiz > 30 {
-            targetQuiz = 30
-        }
-    }
-    log.Printf("[handleGenerateAndSave] transcript_len=%d words=%d targetQuiz~=%d", len(reqBody.Transcript), words, targetQuiz)
+	// Подсчёт желаемого числа вопросов от объёма текста
+	words := len(strings.Fields(reqBody.Transcript))
+	targetQuiz := 0
+	if words > 0 {
+		targetQuiz = words / 120 // ~1 вопрос на 120 слов
+		if targetQuiz < 6 {
+			targetQuiz = 6
+		}
+		if targetQuiz > 30 {
+			targetQuiz = 30
+		}
+	}
+	log.Printf("[handleGenerateAndSave] transcript_len=%d words=%d targetQuiz~=%d", len(reqBody.Transcript), words, targetQuiz)
 
-    // Усиленный промпт с логикой квизов и балансом типов
-    systemPrompt := strings.Join([]string{
-        "You convert transcripts into study materials.",
-        "RULES:",
-        // ...
-    }, "\n")
+	// Усиленный промпт с логикой квизов и балансом типов
+	systemPrompt := strings.Join([]string{
+		"You convert transcripts into study materials.",
+		"RULES:",
+		// ...
+	}, "\n")
 
-    userPrompt := fmt.Sprintf(
-        "Language hint: %s\nAim for ~%d total quiz questions given transcript length (adjust down if insufficient material).\nTranscript:\n%s\n\nReturn JSON only.",
-        reqBody.Language, targetQuiz, reqBody.Transcript,
-    )
+	userPrompt := fmt.Sprintf(
+		"Language hint: %s\nAim for ~%d total quiz questions given transcript length (adjust down if insufficient material).\nTranscript:\n%s\n\nReturn JSON only.",
+		reqBody.Language, targetQuiz, reqBody.Transcript,
+	)
 
-    chatReq := map[string]interface{}{
-        "model":           "gpt-4o-mini",
-        "temperature":     0.3,
-        "response_format": map[string]string{"type": "json_object"},
-        "messages": []map[string]string{
-            {"role": "system", "content": systemPrompt},
-            {"role": "user", "content": userPrompt},
-        },
-    }
-    buf, _ := json.Marshal(chatReq)
-    httpReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(buf))
-    if err != nil {
-        http.Error(w, "Failed to create request", http.StatusInternalServerError)
-        return
-    }
-    httpReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
-    httpReq.Header.Set("Content-Type", "application/json")
+	chatReq := map[string]interface{}{
+		"model":           "gpt-4o-mini",
+		"temperature":     0.3,
+		"response_format": map[string]string{"type": "json_object"},
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
+		},
+	}
+	buf, _ := json.Marshal(chatReq)
+	httpReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(buf))
+	if err != nil {
+		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		return
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
 
-    httpClient := &http.Client{Timeout: 70 * time.Second}
-    resp, err := httpClient.Do(httpReq)
-    if err != nil {
-        log.Printf("[handleGenerateAndSave] OpenAI chat API error: %v", err)
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to generate materials", "error": err.Error()})
-        return
-    }
-    defer resp.Body.Close()
+	httpClient := &http.Client{Timeout: 70 * time.Second}
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		log.Printf("[handleGenerateAndSave] OpenAI chat API error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to generate materials", "error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
 
-    respBytes, err := io.ReadAll(resp.Body)
-    if err != nil {
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to read response"})
-        return
-    }
-    if resp.StatusCode != http.StatusOK {
-        log.Printf("[handleGenerateAndSave] OpenAI chat API error: %s - %s", resp.Status, string(respBytes))
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Generation failed", "status": resp.Status})
-        return
-    }
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to read response"})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[handleGenerateAndSave] OpenAI chat API error: %s - %s", resp.Status, string(respBytes))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Generation failed", "status": resp.Status})
+		return
+	}
 
-    var openaiResp struct {
-        Choices []struct {
-            Message struct {
-                Content string `json:"content"`
-            } `json:"message"`
-        } `json:"choices"`
-    }
-    if err := json.Unmarshal(respBytes, &openaiResp); err != nil {
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to parse OpenAI response"})
-        return
-    }
-    if len(openaiResp.Choices) == 0 {
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Empty OpenAI response"})
-        return
-    }
+	var openaiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBytes, &openaiResp); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to parse OpenAI response"})
+		return
+	}
+	if len(openaiResp.Choices) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Empty OpenAI response"})
+		return
+	}
 
-    var payload GeneratePayload
-    if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payload); err != nil {
-        clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
-        clean = strings.TrimPrefix(clean, "```json")
-        clean = strings.TrimPrefix(clean, "```")
-        clean = strings.TrimSuffix(clean, "```")
-        clean = strings.TrimSpace(clean)
-        if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
-            log.Printf("[handleGenerateAndSave] Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusInternalServerError)
-            json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid JSON from model"})
-            return
-        }
-    }
+	var payload GeneratePayload
+	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payload); err != nil {
+		clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+		clean = strings.TrimPrefix(clean, "```json")
+		clean = strings.TrimPrefix(clean, "```")
+		clean = strings.TrimSuffix(clean, "```")
+		clean = strings.TrimSpace(clean)
+		if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
+			log.Printf("[handleGenerateAndSave] Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid JSON from model"})
+			return
+		}
+	}
 
-    // Сохраняем материал в MongoDB с привязкой к пользователю
-    material := Material{
-        UserID:     userID,
-        Transcript: reqBody.Transcript,
-        Flashcards: payload.Flashcards,
-        Quiz:       payload.Quiz,
-        CreatedAt:  time.Now(),
-        UpdatedAt:  time.Now(),
-    }
-    collection := client.Database("speakapper").Collection("materials")
-    result, err := collection.InsertOne(context.Background(), material)
-    if err != nil {
-        log.Printf("[handleGenerateAndSave] Error saving material: %v", err)
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to save material"})
-        return
-    }
-    material.ID = result.InsertedID.(primitive.ObjectID)
+	// Сохраняем материал в MongoDB с привязкой к пользователю
+	material := Material{
+		UserID:     userID,
+		Transcript: reqBody.Transcript,
+		Flashcards: payload.Flashcards,
+		Quiz:       payload.Quiz,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	collection := client.Database("speakapper").Collection("materials")
+	result, err := collection.InsertOne(context.Background(), material)
+	if err != nil {
+		log.Printf("[handleGenerateAndSave] Error saving material: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to save material"})
+		return
+	}
+	material.ID = result.InsertedID.(primitive.ObjectID)
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "success":    true,
-        "material":   material,
-        // дублируем для удобства фронтенда
-        "flashcards": material.Flashcards,
-        "quiz":       material.Quiz,
-    })
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"material": material,
+		// дублируем для удобства фронтенда
+		"flashcards": material.Flashcards,
+		"quiz":       material.Quiz,
+	})
 }
 
 // Получение одной заметки по ID (с проверкой владельца)
@@ -458,46 +458,46 @@ func getNoteByID(w http.ResponseWriter, r *http.Request) {
 
 // Получение одного материала по ID (с проверкой владельца)
 func getMaterialByID(w http.ResponseWriter, r *http.Request) {
-    vars := mux.Vars(r)
-    id := vars["id"]
-    if id == "" {
-        http.Error(w, "ID is required", http.StatusBadRequest)
-        return
-    }
-    objID, err := primitive.ObjectIDFromHex(id)
-    if err != nil {
-        http.Error(w, "Invalid ID format", http.StatusBadRequest)
-        return
-    }
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if id == "" {
+		http.Error(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+	objID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		return
+	}
 
-    // Проверка JWT
-    authHeader := r.Header.Get("Authorization")
-    if authHeader == "" {
-        http.Error(w, "Authorization header required", http.StatusUnauthorized)
-        return
-    }
-    tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-    token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return jwtSecret, nil })
-    if err != nil || !token.Valid {
-        http.Error(w, "Invalid token", http.StatusUnauthorized)
-        return
-    }
-    claims, _ := token.Claims.(jwt.MapClaims)
-    userIDStr, _ := claims["user_id"].(string)
-    userID, err := primitive.ObjectIDFromHex(userIDStr)
-    if err != nil {
-        http.Error(w, "Invalid user ID", http.StatusUnauthorized)
-        return
-    }
+	// Проверка JWT
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		http.Error(w, "Authorization header required", http.StatusUnauthorized)
+		return
+	}
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return jwtSecret, nil })
+	if err != nil || !token.Valid {
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return
+	}
+	claims, _ := token.Claims.(jwt.MapClaims)
+	userIDStr, _ := claims["user_id"].(string)
+	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+		return
+	}
 
-    coll := client.Database("speakapper").Collection("materials")
-    var mat Material
-    if err := coll.FindOne(context.Background(), bson.M{"_id": objID, "user_id": userID}).Decode(&mat); err != nil {
-        http.Error(w, "Not found", http.StatusNotFound)
-        return
-    }
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "material": mat})
+	coll := client.Database("speakapper").Collection("materials")
+	var mat Material
+	if err := coll.FindOne(context.Background(), bson.M{"_id": objID, "user_id": userID}).Decode(&mat); err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "material": mat})
 }
 
 // SignupRequest представляет запрос на регистрацию
