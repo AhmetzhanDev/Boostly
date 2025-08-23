@@ -239,7 +239,7 @@
       <div class="modal-backdrop" @click="closeAudioModal"></div>
       <div class="modal" role="dialog" aria-modal="true" aria-label="Record audio">
         <div class="modal-head">
-          <div class="modal-title">Record audio</div>
+          <div class="modal-title">Record or upload audio</div>
           <button class="modal-close" @click="closeAudioModal" aria-label="Close">
             ✕
           </button>
@@ -270,6 +270,11 @@
           </div>
 
           <div class="rec-actions" style="justify-content:center; margin-top:8px;">
+            <input ref="fileInput" type="file" accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg,.aac,.flac" @change="onFilePicked" style="display:none" />
+            <button class="btn btn-ghost" :class="{disabled: isRecording}" @click="$refs.fileInput && $refs.fileInput.click()" :disabled="isRecording" aria-label="Upload audio">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5 20h14a1 1 0 0 0 1-1v-7h-2v6H6V12H4v7a1 1 0 0 0 1 1zm7-16-5 5h3v4h4v-4h3l-5-5z"/></svg>
+              <span style="margin-left:6px">Upload audio</span>
+            </button>
             <button class="btn primary" :disabled="!audioUrl || isRecording" @click="generateNote" aria-label="Generate note">
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>
               <span style="margin-left:6px">Generate note</span>
@@ -572,6 +577,17 @@ export default {
         }
       })
     },
+    // Безопасный fetch с таймаутом, чтобы UI не зависал бесконечно
+    async fetchJsonWithTimeout(url, options = {}, timeoutMs = 90000) {
+      const controller = new AbortController()
+      const id = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        const resp = await fetch(url, { ...(options||{}), signal: controller.signal })
+        return resp
+      } finally {
+        clearTimeout(id)
+      }
+    },
     openYoutubeModal() {
       this.youtubeUrl = ''
       this.showYoutubeModal = true
@@ -645,7 +661,7 @@ export default {
         }
       } catch (e) {
         console.error(e)
-        this.proc.error = 'Ошибка генерации материалов'
+        this.proc.error = 'Ошибка генерации материалов: ' + (e?.message || e)
         return
       }
     },
@@ -870,7 +886,7 @@ export default {
           setTimeout(() => { this.viewNoteNow() }, 350)
         }
       } catch (e) {
-        this.proc.error = 'Ошибка генерации материалов'
+        this.proc.error = 'Ошибка генерации материалов: ' + (e?.message || e)
         console.error(e)
         return
       }
@@ -917,38 +933,59 @@ export default {
       const tick = setInterval(() => { this.proc.step4.elapsed = Math.floor((Date.now()-t0)/1000) }, 1000)
       try {
         const token = localStorage.getItem('token')
-        // Prefer generate-and-save with JWT
+        // Основной путь: generate-and-save с JWT и таймаутом
         if (token) {
-          const resp = await fetch('http://localhost:8080/api/generate-and-save', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + token
-            },
-            body: JSON.stringify({ transcript })
-          })
-          if (resp.ok) {
-            const data = await resp.json()
-            // Expect full material back
-            return {
-              id: data.id || data._id,
-              _id: data._id,
-              title: data.title,
-              createdAt: data.createdAt,
-              transcript: data.transcript,
-              flashcards: data.flashcards || [],
-              quiz: data.quiz || []
+          try {
+            const resp = await this.fetchJsonWithTimeout('http://localhost:8080/api/generate-and-save', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+              },
+              body: JSON.stringify({ transcript })
+            }, 90000)
+
+            if (resp.ok) {
+              const data = await resp.json().catch(() => ({}))
+              if (data && data.material && (data.material.id || data.material._id)) {
+                return {
+                  id: data.material.id || data.material._id,
+                  transcript: data.material.transcript,
+                  flashcards: data.material.flashcards || [],
+                  quiz: data.material.quiz || []
+                }
+              }
+              return {
+                id: data.id || data._id,
+                transcript: data.transcript,
+                flashcards: data.flashcards || [],
+                quiz: data.quiz || []
+              }
+            } else if (resp.status !== 401 && resp.status !== 403) {
+              const errBody = await resp.text().catch(() => '')
+              throw new Error(`Ошибка сервера (${resp.status}): ${errBody || 'generate-and-save failed'}`)
             }
+            // Если 401/403 — тихий переход к локальной генерации
+          } catch (e) {
+            if (e && e.name === 'AbortError') {
+              throw new Error('Таймаут генерации (generate-and-save)')
+            }
+            // Прочие ошибки — пробуем фоллбэк ниже
+            if (String(e?.message||'').includes('Таймаут')) throw e
           }
-          // If 401/403 or other error, fall through to local generation endpoint
         }
-        // Fallback: local generation without saving
-        const resp2 = await fetch('http://localhost:8080/api/generate', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+
+        // Фоллбэк без сохранения: /api/generate с меньшим таймаутом
+        const resp2 = await this.fetchJsonWithTimeout('http://localhost:8080/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ transcript })
-        })
-        if (!resp2.ok) throw new Error('Generation failed')
-        const data2 = await resp2.json()
+        }, 60000)
+        if (!resp2.ok) {
+          const errBody2 = await resp2.text().catch(() => '')
+          throw new Error(`Ошибка сервера (${resp2.status}): ${errBody2 || 'generate failed'}`)
+        }
+        const data2 = await resp2.json().catch(() => ({}))
         return { flashcards: data2.flashcards || [], quiz: data2.quiz || [] }
       } finally {
         clearInterval(tick)
@@ -1009,6 +1046,25 @@ export default {
       localStorage.setItem('autoRedirect', this.autoRedirect ? 'true' : 'false')
     },
     toast(msg) { console.log('[Dashboard]', msg) },
+    onFilePicked(e) {
+      try {
+        const file = e?.target?.files?.[0]
+        if (!file) return
+        // Визуально сбросить текущий плеер
+        this.stopPlayback && this.stopPlayback()
+        // Сохранить как общий источник аудио
+        this.audioBlob = file
+        try { if (this.audioUrl) URL.revokeObjectURL(this.audioUrl) } catch(_){}
+        this.audioUrl = URL.createObjectURL(file)
+        this.toast && this.toast('Аудиофайл добавлен')
+      } catch (err) {
+        console.error('onFilePicked error', err)
+        this.toast && this.toast('Не удалось прочитать файл')
+      } finally {
+        // очистим value, чтобы можно было выбрать тот же файл повторно
+        try { if (this.$refs.fileInput) this.$refs.fileInput.value = '' } catch(_){}
+      }
+    }
   }
 }
 </script>
