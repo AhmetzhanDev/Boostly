@@ -34,7 +34,7 @@
     <!-- Single expanding side pane -->
     <aside class="navpane" :class="{ open: sidebarOpen }" @click.self="profileMenu=false">
       <div v-if="sidebarOpen" class="pane-head">
-        <div class="pane-logo">Boostly</div>
+        <div class="pane-logo">SpeakApper AI</div>
         <div style="display:flex; gap:8px; align-items:center;">
           
           <button class="collapse-btn" @click="toggleSidebar" aria-label="Close menu">
@@ -203,7 +203,13 @@
             <div class="note-title">{{ note.title }}</div>
             <div class="note-meta">Last opened {{ note.lastOpened }}</div>
           </div>
-          <button class="note-more" @click.stop="moreNote(note)">⋯</button>
+          <button class="note-more" @click.stop="moreNote(note)" title="Удалить заметку">
+            <svg viewBox="0 0 24 24" width="16" height="16" class="trash-icon">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              <line x1="10" y1="11" x2="10" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <line x1="14" y1="11" x2="14" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
         </article>
         <div v-if="filteredNotes.length===0" class="empty">No notes yet</div>
       </section>
@@ -328,6 +334,34 @@
       </div>
     </div>
 
+    <!-- Delete Confirmation Modal -->
+    <div v-if="deleteModal.show" class="modal-wrap" @keydown.esc="closeDeleteModal">
+      <div class="modal-backdrop" @click="closeDeleteModal"></div>
+      <div class="modal delete-modal" role="dialog" aria-modal="true" aria-label="Confirm deletion">
+        <div class="delete-icon">
+          <svg viewBox="0 0 24 24" width="48" height="48">
+            <path fill="#ef4444" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+          </svg>
+        </div>
+        <div class="delete-content">
+          <h3 class="delete-title">Удалить запись?</h3>
+          <p class="delete-message">
+            Вы уверены, что хотите удалить <strong>"{{ deleteModal.item?.title }}"</strong>?
+            <br>Это действие нельзя отменить.
+          </p>
+        </div>
+        <div class="delete-actions">
+          <button class="btn btn-danger" @click="confirmDelete">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+            </svg>
+            Удалить
+          </button>
+          <button class="btn btn-ghost" @click="closeDeleteModal">Отмена</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Processing modal -->
     <div v-if="proc.show" class="modal-wrap" @keydown.esc="proc.show=false">
       <div class="modal-backdrop" @click="proc.show=false"></div>
@@ -423,6 +457,10 @@ export default {
       theme: 'dark',
       // Profile state
       profileMenu: false,
+      deleteModal: {
+        show: false,
+        item: null
+      },
       user: null,
       quickActions: [
         { key: 'blank', title: 'Blank document', desc: 'Start from scratch', color: 'c-purple', action: () => this.createBlank() },
@@ -513,7 +551,12 @@ export default {
       this.applyTheme('dark')
     }
     // Подхватить пользователя из localStorage
-    try { const u = localStorage.getItem('user'); this.user = u ? JSON.parse(u) : null } catch(e) {}
+    try { 
+      const u = localStorage.getItem('user')
+      this.user = u ? JSON.parse(u) : null 
+    } catch(e) {
+      this.user = null
+    }
     // Загрузка пользовательских материалов, если есть токен
     try { this.fetchMaterials() } catch(e) { console.warn(e) }
   },
@@ -717,7 +760,7 @@ export default {
       }
     },
     toggleSidebar(){ this.sidebarOpen = !this.sidebarOpen },
-    goSettings(){ this.toast('Settings') },
+    goSettings(){ this.$router.push('/settings') },
     upgrade(){ this.showUpgradeModal = true },
     closeUpgradeModal(){ this.showUpgradeModal = false },
     selectPlan(kind){
@@ -783,7 +826,50 @@ export default {
       } catch(_){ /* ignore */ }
       try { this.$router.push('/note/' + n.id) } catch(e) { this.toast('Open: ' + n.title) }
     },
-    moreNote() { this.toast('More…') },
+    moreNote(note) { 
+      this.deleteModal.show = true
+      this.deleteModal.item = note
+    },
+    
+    confirmDelete() {
+      if (this.deleteModal.item) {
+        this.deleteNote(this.deleteModal.item.id)
+      }
+      this.closeDeleteModal()
+    },
+    
+    closeDeleteModal() {
+      this.deleteModal.show = false
+      this.deleteModal.item = null
+    },
+    
+    async deleteNote(noteId) {
+      try {
+        const token = localStorage.getItem('token')
+        // Определяем тип записи (заметка или материал)
+        const note = this.notes.find(n => n.id === noteId)
+        const isNote = note && note.type === 'note'
+        const endpoint = isNote ? 'notes' : 'materials'
+        
+        const response = await fetch(`http://localhost:8080/api/${endpoint}/${noteId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+        
+        if (response.ok) {
+          // Удаляем из локального списка
+          this.notes = this.notes.filter(n => n.id !== noteId)
+          this.toast(isNote ? 'Заметка удалена' : 'Материал удален')
+        } else {
+          this.toast('Ошибка при удалении')
+        }
+      } catch (error) {
+        console.error('Delete error:', error)
+        this.toast('Ошибка при удалении')
+      }
+    },
 
     // Audio recording logic
     async toggleRecord() {
@@ -1272,8 +1358,97 @@ export default {
 .note-ico svg { width:20px; height:20px; fill: currentColor; }
 .note-title { font-weight:700; }
 .note-meta { color:var(--muted); font-size:12px; }
-.note-more { height:32px; width:32px; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; }
+.note-more { height:32px; width:32px; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
+.note-more:hover { background:rgba(239,68,68,.1); border-color:rgba(239,68,68,.3); color:#ef4444; transform: scale(1.05); }
+.trash-icon { transition: all 0.2s ease; }
+.note-more:hover .trash-icon { transform: scale(1.1); }
 .empty { color:var(--muted); text-align:center; padding:40px 0; }
+
+/* Delete Modal Styles */
+.delete-modal {
+  max-width: 420px;
+  padding: 0;
+  text-align: center;
+  border-radius: 16px;
+  overflow: hidden;
+  animation: deleteModalIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.delete-icon {
+  padding: 24px 24px 16px;
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+}
+
+.delete-content {
+  padding: 0 24px 24px;
+}
+
+.delete-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 12px;
+}
+
+.delete-message {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+  font-size: 14px;
+}
+
+.delete-message strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.delete-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px 24px;
+  background: rgba(0,0,0,0.02);
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: white;
+  border: 1px solid #dc2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  transition: all 0.2s ease;
+}
+
+.btn-ghost:hover {
+  background: rgba(0,0,0,0.05);
+  color: var(--text);
+}
+
+@keyframes deleteModalIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.9) translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
 
 @media (max-width: 980px){ .quick{ grid-template-columns: 1fr 1fr; } }
 @media (max-width: 640px){ .quick{ grid-template-columns: 1fr; } .h1{font-size:32px;} }

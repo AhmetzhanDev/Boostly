@@ -250,7 +250,7 @@ export default {
     },
 
     goToLogin() {
-      console.log('Navigate to login')
+      this.$router.push('/signin')
     },
     goBack() { this.$router.push('/') }
   }

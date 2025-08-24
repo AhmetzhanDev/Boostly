@@ -24,23 +24,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"golang.org/x/crypto/bcrypt"
 )
-
-// User представляет структуру пользователя
-type User struct {
-	ID        string    `json:"id"`
-	FirstName string    `json:"firstName"`
-	LastName  string    `json:"lastName"`
-	Email     string    `json:"email"`
-	Password  string    `json:"-"` // Не отправляем пароль в JSON
-	CreatedAt time.Time `json:"createdAt"`
-	// Поля подписки (Lemon Squeezy)
-	Premium          bool      `bson:"premium,omitempty" json:"premium"`
-	Plan             string    `bson:"plan,omitempty" json:"plan,omitempty"`
-	LsSubscriptionID string    `bson:"ls_subscription_id,omitempty" json:"ls_subscription_id,omitempty"`
-	CurrentPeriodEnd time.Time `bson:"current_period_end,omitempty" json:"current_period_end,omitempty"`
-}
 
 // Lemon Squeezy webhook secret (set via env)
 var lemonWebhookSecret string
@@ -185,13 +169,7 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 	// Check yt-dlp availability
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		log.Printf("yt-dlp not found: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusFailedDependency)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "yt-dlp is required on server",
-			"hint":    "Install with: brew install yt-dlp (mac) or pipx install yt-dlp",
-		})
+		JSONErrorWithDetails(w, http.StatusFailedDependency, "yt-dlp is required on server", "Install with: brew install yt-dlp (mac) or pipx install yt-dlp")
 		return
 	}
 
@@ -255,9 +233,7 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 						outBytes3c, err3c := ytdlpOutput(args3c...)
 						if err3c != nil {
 							log.Printf("yt-dlp chrome-cookies failed: %v; output: %s", err3c, string(outBytes3c))
-							w.Header().Set("Content-Type", "application/json")
-							w.WriteHeader(http.StatusConflict)
-							json.NewEncoder(w).Encode(map[string]interface{}{
+							JSONResponse(w, http.StatusConflict, map[string]interface{}{
 								"success": false,
 								"message": "Не удалось скачать аудио с YouTube без авторизации",
 								"details": string(outBytes3c),
@@ -284,12 +260,7 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 		}
 		if found == "" {
 			log.Printf("YouTube transcribe: audio not found after yt-dlp, base=%s", base)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"message": "Audio file not found after download",
-			})
+			JSONError(w, http.StatusInternalServerError, "Audio file not found after download")
 			return
 		}
 		outPath = found
@@ -304,17 +275,10 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 	text, err := transcribeLongAudio(outPath, body.Language)
 	if err != nil {
 		log.Printf("YouTube segmented transcription error: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "Transcription failed",
-			"error":   err.Error(),
-		})
+		JSONErrorWithDetails(w, http.StatusInternalServerError, "Transcription failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	JSONResponse(w, http.StatusOK, map[string]interface{}{
 		"success":       true,
 		"transcription": text,
 		"source":        "youtube",
@@ -328,9 +292,7 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 // Генерация и сохранение материалов в одну операцию
 func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Method not allowed"})
+		JSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -338,65 +300,23 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	log.Println("[handleGenerateAndSave] start")
 
 	// Извлекаем пользователя из JWT
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Authorization header required"})
+	auth := extractUserFromJWT(w, r)
+	if auth == nil {
 		return
 	}
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
-	})
-	if err != nil || !token.Valid {
-		log.Printf("[handleGenerateAndSave] invalid token: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid token"})
-		return
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		log.Println("[handleGenerateAndSave] invalid token claims type")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid token claims"})
-		return
-	}
-	userIDStr, ok := claims["user_id"].(string)
-	if !ok {
-		// Иногда ObjectID может прийти не строкой — логируем тип для диагностики
-		log.Printf("[handleGenerateAndSave] user_id claim not string, actual=%T value=%v", claims["user_id"], claims["user_id"])
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid user ID in token"})
-		return
-	}
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
-	if err != nil {
-		log.Printf("[handleGenerateAndSave] invalid userID hex: %s error=%v", userIDStr, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid user ID format"})
-		return
-	}
+	userID := auth.UserID
 	log.Printf("[handleGenerateAndSave] userID=%s", userID.Hex())
 
 	// Читаем тело запроса
 	var reqBody GenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 		log.Printf("[handleGenerateAndSave] decode body error: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid request body"})
+		JSONError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if reqBody.Transcript == "" {
 		log.Println("[handleGenerateAndSave] empty transcript")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Transcript is required"})
+		JSONError(w, http.StatusBadRequest, "Transcript is required")
 		return
 	}
 
@@ -454,25 +374,19 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		log.Printf("[handleGenerateAndSave] OpenAI chat API error: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to generate materials", "error": err.Error()})
+		JSONErrorWithDetails(w, http.StatusInternalServerError, "Failed to generate materials", err.Error())
 		return
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to read response"})
+		JSONError(w, http.StatusInternalServerError, "Failed to read response")
 		return
 	}
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[handleGenerateAndSave] OpenAI chat API error: %s - %s", resp.Status, string(respBytes))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Generation failed", "status": resp.Status})
+		JSONErrorWithDetails(w, http.StatusInternalServerError, "Generation failed", resp.Status)
 		return
 	}
 
@@ -484,15 +398,11 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBytes, &openaiResp); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to parse OpenAI response"})
+		JSONError(w, http.StatusInternalServerError, "Failed to parse OpenAI response")
 		return
 	}
 	if len(openaiResp.Choices) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Empty OpenAI response"})
+		JSONError(w, http.StatusInternalServerError, "Empty OpenAI response")
 		return
 	}
 
@@ -641,15 +551,12 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	result, err := collection.InsertOne(ctxIns, material)
 	if err != nil {
 		log.Printf("[handleGenerateAndSave] Error saving material: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to save material", "error": err.Error()})
+		JSONErrorWithDetails(w, http.StatusInternalServerError, "Failed to save material", err.Error())
 		return
 	}
 	log.Printf("[handleGenerateAndSave] inserted material _id=%v (type=%T) in %s", result.InsertedID, result.InsertedID, time.Since(startIns))
 	material.ID = result.InsertedID.(primitive.ObjectID)
 
-	w.Header().Set("Content-Type", "application/json")
 	// Guard against null slices in JSON
 	respFlash := material.Flashcards
 	if respFlash == nil {
@@ -659,7 +566,7 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	if respQuiz == nil {
 		respQuiz = []QuizQuestion{}
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	JSONResponse(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"material":   material,
 		"flashcards": respFlash,
@@ -667,240 +574,13 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Получение одной заметки по ID (с проверкой владельца)
-func getNoteByID(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-	if id == "" {
-		http.Error(w, "ID is required", http.StatusBadRequest)
-		return
-	}
-	objID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
-		return
-	}
-
-	// Проверка JWT
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		http.Error(w, "Authorization header required", http.StatusUnauthorized)
-		return
-	}
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return jwtSecret, nil })
-	if err != nil || !token.Valid {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return
-	}
-	claims, _ := token.Claims.(jwt.MapClaims)
-	userIDStr, _ := claims["user_id"].(string)
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
-		return
-	}
-
-	coll := client.Database("speakapper").Collection("notes")
-	var note Note
-	if err := coll.FindOne(context.Background(), bson.M{"_id": objID, "user_id": userID}).Decode(&note); err != nil {
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "note": note})
-}
-
-// Получение одного материала по ID (с проверкой владельца)
-func getMaterialByID(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-	if id == "" {
-		http.Error(w, "ID is required", http.StatusBadRequest)
-		return
-	}
-	objID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
-		return
-	}
-
-	// Проверка JWT
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		http.Error(w, "Authorization header required", http.StatusUnauthorized)
-		return
-	}
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return jwtSecret, nil })
-	if err != nil || !token.Valid {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return
-	}
-	claims, _ := token.Claims.(jwt.MapClaims)
-	userIDStr, _ := claims["user_id"].(string)
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
-		return
-	}
-
-	coll := client.Database("speakapper").Collection("materials")
-	var mat Material
-	if err := coll.FindOne(context.Background(), bson.M{"_id": objID, "user_id": userID}).Decode(&mat); err != nil {
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	ff := mat.Flashcards
-	if ff == nil {
-		ff = []Flashcard{}
-	}
-	qq := mat.Quiz
-	if qq == nil {
-		qq = []QuizQuestion{}
-	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "material": map[string]interface{}{
-		"id":         mat.ID,
-		"user_id":    mat.UserID,
-		"transcript": mat.Transcript,
-		"flashcards": ff,
-		"quiz":       qq,
-		"created_at": mat.CreatedAt,
-		"updated_at": mat.UpdatedAt,
-	}})
-}
-
-// SignupRequest представляет запрос на регистрацию
-type SignupRequest struct {
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-	Email     string `json:"email"`
-	Password  string `json:"password"`
-}
-
-// SignupResponse представляет ответ на регистрацию
-type SignupResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	User    *User  `json:"user,omitempty"`
-	Token   string `json:"token,omitempty"`
-}
-
 // LoginRequest представляет запрос на вход
-type LoginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-// GoogleSignupRequest представляет запрос на регистрацию через Google
-type GoogleSignupRequest struct {
-	Token   string `json:"token"`
-	IDToken string `json:"idToken"`
-}
 
 // JWT секретный ключ (в продакшене используйте переменную окружения)
-var jwtSecret = []byte("your-secret-key")
+var jwtSecret []byte
 
 // OpenAI API ключ теперь берём из переменной окружения
 var openaiAPIKey string
-
-// OpenAI API структуры
-type WhisperRequest struct {
-	Model    string `json:"model"`
-	File     string `json:"file"`
-	Language string `json:"language,omitempty"`
-}
-
-type WhisperResponse struct {
-	Text string `json:"text"`
-}
-
-// Note структура для MongoDB
-type Note struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	UserID     primitive.ObjectID `bson:"user_id" json:"user_id"`
-	Title      string             `bson:"title" json:"title"`
-	Content    string             `bson:"content" json:"content"`
-	Type       string             `bson:"type" json:"type"`
-	Tab        string             `bson:"tab" json:"tab"`
-	LastOpened string             `bson:"last_opened" json:"last_opened"`
-	CreatedAt  time.Time          `bson:"created_at" json:"created_at"`
-	UpdatedAt  time.Time          `bson:"updated_at" json:"updated_at"`
-}
-
-// GPT generation types
-type GenerateRequest struct {
-	Transcript string `json:"transcript"`
-	Language   string `json:"language,omitempty"`
-}
-
-type Flashcard struct {
-	Term       string `json:"term"`
-	Definition string `json:"definition"`
-	Example    string `json:"example,omitempty"`
-}
-
-// FlexString позволяет распаковывать как строки, так и числа в строковое поле
-type FlexString string
-
-func (s *FlexString) UnmarshalJSON(b []byte) error {
-	if len(b) == 0 {
-		return nil
-	}
-	// Строка в кавычках
-	if b[0] == '"' {
-		var str string
-		if err := json.Unmarshal(b, &str); err != nil {
-			return err
-		}
-		*s = FlexString(str)
-		return nil
-	}
-	// Число -> строка
-	var num json.Number
-	if err := json.Unmarshal(b, &num); err == nil {
-		*s = FlexString(num.String())
-		return nil
-	}
-	// Фоллбэк: любое значение -> строка
-	var v interface{}
-	if err := json.Unmarshal(b, &v); err == nil {
-		*s = FlexString(fmt.Sprint(v))
-		return nil
-	}
-	return fmt.Errorf("invalid value for FlexString: %s", string(b))
-}
-
-type QuizQuestion struct {
-	ID         FlexString  `json:"id,omitempty"`
-	Type       string      `json:"type,omitempty"` // MCQ, MSQ, CLOZE, TF, MATCHING, SHORT
-	Question   string      `json:"question"`
-	Options    []string    `json:"options,omitempty"`    // MCQ/MSQ/TF/CLOZE
-	Answer     string      `json:"answer,omitempty"`     // Верный ответ для MCQ/TF/SHORT/CLOZE
-	Correct    interface{} `json:"correct,omitempty"`    // Может быть bool (TF/MCQ) или []string (MSQ)
-	Pairs      [][]string  `json:"pairs,omitempty"`      // MATCHING: массив пар [[left,right], ...]
-	Rationale  string      `json:"rationale,omitempty"`  // Объяснение
-	Difficulty string      `json:"difficulty,omitempty"` // easy|medium|hard
-	Citation   string      `json:"citation,omitempty"`   // Цитата/ссылка на фрагмент транскрипта
-}
-
-type GeneratePayload struct {
-	Flashcards   []Flashcard    `json:"flashcards"`
-	Quiz         []QuizQuestion `json:"quiz"`
-	LanguageCode string         `json:"languageCode,omitempty"`
-}
-
-// Учебные материалы (материализованные карточки/квиз)
-type Material struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	UserID     primitive.ObjectID `bson:"user_id" json:"user_id"`
-	Transcript string             `bson:"transcript" json:"transcript"`
-	Flashcards []Flashcard        `bson:"flashcards" json:"flashcards"`
-	Quiz       []QuizQuestion     `bson:"quiz" json:"quiz"`
-	CreatedAt  time.Time          `bson:"created_at" json:"created_at"`
-	UpdatedAt  time.Time          `bson:"updated_at" json:"updated_at"`
-}
 
 func handleMaterials(w http.ResponseWriter, r *http.Request) {
 	// Extract user ID from JWT token
@@ -979,8 +659,7 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		JSONResponse(w, http.StatusOK, map[string]interface{}{
 			"success":   true,
 			"materials": responseMaterials,
 		})
@@ -1035,8 +714,7 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 	material.ID = result.InsertedID.(primitive.ObjectID)
 
 	// Return the created material
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	JSONResponse(w, http.StatusOK, map[string]interface{}{
 		"success":  true,
 		"material": material,
 	})
@@ -1044,39 +722,11 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 
 func handleNotes(w http.ResponseWriter, r *http.Request) {
 	// Extract user ID from JWT token
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		http.Error(w, "Authorization header required", http.StatusUnauthorized)
+	auth := extractUserFromJWT(w, r)
+	if auth == nil {
 		return
 	}
-
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
-	})
-
-	if err != nil || !token.Valid {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
-		return
-	}
-
-	userIDStr, ok := claims["user_id"].(string)
-	if !ok {
-		http.Error(w, "Invalid user ID in token", http.StatusUnauthorized)
-		return
-	}
-
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-		return
-	}
+	userID := auth.UserID
 
 	// Handle GET request - fetch user notes
 	if r.Method == "GET" {
@@ -1113,8 +763,7 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		JSONResponse(w, http.StatusOK, map[string]interface{}{
 			"success": true,
 			"notes":   responseNotes,
 		})
@@ -1160,130 +809,9 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 	note.ID = result.InsertedID.(primitive.ObjectID)
 
 	// Return the created note
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	JSONResponse(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"note":    note,
-	})
-}
-
-func handleTranscribe(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Parse multipart form (allow large)
-	if err := r.ParseMultipartForm(1024 << 20); err != nil { // 1GB streamed to temp
-		http.Error(w, "Failed to parse form", http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("audio")
-	if err != nil {
-		http.Error(w, "No audio file provided", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	log.Printf("Received audio file: %s, size: %d bytes", header.Filename, header.Size)
-
-	// Save upload to temp file on disk to avoid memory blowups
-	tmpDir := os.TempDir()
-	tmpIn := filepath.Join(tmpDir, fmt.Sprintf("upload_%d_%s", time.Now().UnixNano(), filepath.Base(header.Filename)))
-	out, err := os.Create(tmpIn)
-	if err != nil {
-		http.Error(w, "Failed to create temp file", http.StatusInternalServerError)
-		return
-	}
-	if _, err := io.Copy(out, file); err != nil {
-		out.Close()
-		os.Remove(tmpIn)
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
-		return
-	}
-	out.Close()
-	defer os.Remove(tmpIn)
-
-	// Threshold for long audio (e.g., > 20MB)
-	const longThreshold = 20 * 1024 * 1024
-	if header.Size > longThreshold {
-		text, err := transcribeLongAudio(tmpIn, "")
-		if err != nil {
-			log.Printf("Long transcription error: %v", err)
-			http.Error(w, "Transcription failed", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":       true,
-			"transcription": text,
-			"filename":      header.Filename,
-			"size":          header.Size,
-			"mode":          "segmented",
-		})
-		return
-	}
-
-	// Small file: read and send directly
-	fileBytes, err := os.ReadFile(tmpIn)
-	if err != nil {
-		http.Error(w, "Failed to read temp file", http.StatusInternalServerError)
-		return
-	}
-
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
-	part, err := writer.CreateFormFile("file", header.Filename)
-	if err != nil {
-		http.Error(w, "Failed to create form file", http.StatusInternalServerError)
-		return
-	}
-	part.Write(fileBytes)
-	writer.WriteField("model", "whisper-1")
-	writer.Close()
-
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/audio/transcriptions", &requestBody)
-	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+openaiAPIKey)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("OpenAI API error: %v", err)
-		http.Error(w, "Failed to transcribe audio", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		http.Error(w, "Failed to read response", http.StatusInternalServerError)
-		return
-	}
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("OpenAI API error: %s - %s", resp.Status, string(respBody))
-		http.Error(w, "Transcription failed", http.StatusInternalServerError)
-		return
-	}
-
-	var whisperResp WhisperResponse
-	if err := json.Unmarshal(respBody, &whisperResp); err != nil {
-		http.Error(w, "Failed to parse response", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":       true,
-		"transcription": whisperResp.Text,
-		"filename":      header.Filename,
-		"size":          header.Size,
-		"mode":          "single",
 	})
 }
 
@@ -1466,8 +994,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	JSONResponse(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"flashcards": payload.Flashcards,
 		"quiz":       payload.Quiz,
@@ -1509,13 +1036,24 @@ func main() {
 		handlers.AllowedOrigins([]string{
 			"http://localhost:3001",
 			"http://localhost:3000",
-			"http://localhost:5173",
-			"http://127.0.0.1:5173",
+			"http://127.0.0.1:3001",
+			"http://127.0.0.1:3000",
 		}),
 		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
 		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
 		handlers.AllowCredentials(),
+		handlers.ExposedHeaders([]string{"Cross-Origin-Opener-Policy"}),
 	)
+
+	// Add COOP headers middleware
+	coopMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set Cross-Origin-Opener-Policy to allow cross-origin communication
+			w.Header().Set("Cross-Origin-Opener-Policy", "unsafe-none")
+			w.Header().Set("Cross-Origin-Embedder-Policy", "unsafe-none")
+			next.ServeHTTP(w, r)
+		})
+	}
 
 	// Роуты
 	r.HandleFunc("/api/signup", signupHandler).Methods("POST")
@@ -1523,6 +1061,7 @@ func main() {
 	r.HandleFunc("/api/google-signup", googleSignupHandler).Methods("POST")
 	r.HandleFunc("/api/health", healthHandler).Methods("GET")
 	r.HandleFunc("/api/users", getAllUsersHandler).Methods("GET")
+	r.HandleFunc("/api/user", getUserHandler).Methods("GET")
 	r.HandleFunc("/api/transcribe", handleTranscribe).Methods("POST")
 	r.HandleFunc("/api/transcribe-youtube", handleTranscribeYouTube).Methods("POST")
 	r.HandleFunc("/api/notes", handleNotes).Methods("POST")
@@ -1530,246 +1069,17 @@ func main() {
 	r.HandleFunc("/api/generate", handleGenerate).Methods("POST")
 	r.HandleFunc("/api/materials", handleMaterials).Methods("POST", "GET")
 	r.HandleFunc("/api/generate-and-save", handleGenerateAndSave).Methods("POST")
-	r.HandleFunc("/api/materials/{id}", getMaterialByID).Methods("GET")
 	r.HandleFunc("/api/notes/{id}", getNoteByID).Methods("GET")
-
-	// Lemon Squeezy webhook endpoint
+	r.HandleFunc("/api/notes/{id}", deleteNoteByID).Methods("DELETE")
+	r.HandleFunc("/api/materials/{id}", getMaterialByID).Methods("GET")
+	r.HandleFunc("/api/materials/{id}", deleteMaterialByID).Methods("DELETE")
 	r.HandleFunc("/api/lemonsqueezy/webhook", handleLemonWebhook).Methods("POST")
 
-	// Применяем CORS middleware
-	handler := corsMiddleware(r)
+	// Применяем CORS и COOP middleware
+	handler := corsMiddleware(coopMiddleware(r))
 
 	fmt.Println("🚀 SpeakApper Backend запущен на порту 8080")
 	log.Fatal(http.ListenAndServe(":8080", handler))
-}
-
-// Обработчик регистрации
-func signupHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req SignupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Проверяем, существует ли пользователь
-	exists, err := UserExists(req.Email)
-	if err != nil {
-		log.Printf("Error checking user existence: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	if exists {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(SignupResponse{
-			Success: false,
-			Message: "User already exists",
-		})
-		return
-	}
-
-	// Хешируем пароль
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Printf("Error hashing password: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Создаем пользователя
-	user := &User{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Email:     req.Email,
-		Password:  string(hashedPassword),
-	}
-
-	// Сохраняем в базу данных
-	if err := CreateUser(user); err != nil {
-		log.Printf("Error creating user: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Генерируем JWT токен
-	token, err := generateJWT(user)
-	if err != nil {
-		log.Printf("Error generating JWT: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Отправляем ответ
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SignupResponse{
-		Success: true,
-		Message: "User registered successfully",
-		User:    user,
-		Token:   token,
-	})
-}
-
-// Обработчик входа
-func loginHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Получаем пользователя из базы данных
-	user, err := GetUserByEmail(req.Email)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "Invalid credentials",
-		})
-		return
-	}
-
-	// Проверяем пароль
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "Invalid credentials",
-		})
-		return
-	}
-
-	// Генерируем JWT токен
-	token, err := generateJWT(user)
-	if err != nil {
-		log.Printf("Error generating JWT: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Отправляем ответ
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Login successful",
-		"user":    user,
-		"token":   token,
-	})
-}
-
-// Обработчик регистрации через Google
-func googleSignupHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req GoogleSignupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Валидируем Google токен
-	googleUser, err := ValidateGoogleToken(req.Token)
-	if err != nil {
-		log.Printf("Error validating Google token: %v", err)
-		http.Error(w, "Invalid Google token", http.StatusUnauthorized)
-		return
-	}
-
-	// Проверяем, существует ли пользователь
-	exists, err := UserExists(googleUser.Email)
-	if err != nil {
-		log.Printf("Error checking user existence: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	var user *User
-	if exists {
-		// Пользователь существует, получаем его данные
-		user, err = GetUserByEmail(googleUser.Email)
-		if err != nil {
-			log.Printf("Error getting existing user: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-	} else {
-		// Создаем нового пользователя
-		user = &User{
-			FirstName: googleUser.GivenName,
-			LastName:  googleUser.FamilyName,
-			Email:     googleUser.Email,
-			Password:  "", // Google пользователи не имеют пароля
-		}
-
-		if err := CreateUser(user); err != nil {
-			log.Printf("Error creating Google user: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// Генерируем JWT токен
-	token, err := generateJWT(user)
-	if err != nil {
-		log.Printf("Error generating JWT: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Отправляем ответ
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Google authentication successful",
-		"user":    user,
-		"token":   token,
-	})
-}
-
-// Обработчик проверки здоровья сервера
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "healthy",
-		"time":   time.Now(),
-	})
-}
-
-// Обработчик получения всех пользователей
-func getAllUsersHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	users, err := GetAllUsers()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"message": "Ошибка при получении пользователей",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"users":   users,
-		"count":   len(users),
-	})
 }
 
 // Генерация JWT токена

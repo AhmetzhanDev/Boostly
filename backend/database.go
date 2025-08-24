@@ -98,6 +98,51 @@ func ValidateGoogleToken(accessToken string) (*GoogleUserInfo, error) {
 	return &userInfo, nil
 }
 
+// ValidateGoogleIDToken validates Google ID token and gets user information
+func ValidateGoogleIDToken(idToken string) (*GoogleUserInfo, error) {
+	url := fmt.Sprintf("https://oauth2.googleapis.com/tokeninfo?id_token=%s", idToken)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("error requesting Google tokeninfo API: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("invalid response status from Google tokeninfo API: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+
+	var tokenInfo struct {
+		Email         string `json:"email"`
+		Name          string `json:"name"`
+		Picture       string `json:"picture"`
+		EmailVerified string `json:"email_verified"`
+		Aud           string `json:"aud"`
+	}
+
+	if err := json.Unmarshal(body, &tokenInfo); err != nil {
+		return nil, fmt.Errorf("error parsing response: %v", err)
+	}
+
+	// Verify email is verified
+	if tokenInfo.EmailVerified != "true" {
+		return nil, fmt.Errorf("email not verified")
+	}
+
+	userInfo := &GoogleUserInfo{
+		Email:   tokenInfo.Email,
+		Name:    tokenInfo.Name,
+		Picture: tokenInfo.Picture,
+	}
+
+	return userInfo, nil
+}
+
 // CreateUser создает нового пользователя в базе данных
 func CreateUser(user *User) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
