@@ -2,23 +2,45 @@
   <div class="note-wrap">
     <header class="nv-topbar">
       <button class="back" @click="$router.push('/dashboard')" aria-label="Back">← Back</button>
-      <div style="flex:1"></div>
-      <div style="width:72px"></div>
+      <h1 class="nv-title" v-if="note">{{ note.title }}</h1>
+      <div class="spacer"></div>
+      <nav class="tabs">
+        <button class="tab" :class="{active: active==='note'}" @click="active='note'">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="4" width="16" height="16" rx="2"/>
+            <path d="M9 3h6v4H9z"/>
+            <path d="M8 12h8M8 16h8"/>
+          </svg>
+          <span>Note</span>
+        </button>
+        <button class="tab" :class="{active: active==='quiz'}" @click="active='quiz'">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+            <circle cx="17" cy="7" r="3.5"/>
+            <path d="M4 17l5-3 5 3 5-3v7H4z"/>
+          </svg>
+          <span>Quiz</span>
+        </button>
+        <button class="tab" :class="{active: active==='flash'}" @click="active='flash'">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="6" width="12" height="14" rx="2"/>
+            <path d="M9 4h10v12"/>
+          </svg>
+          <span>Flashcards</span>
+        </button>
+        <button class="tab" :class="{active: active==='transcript'}" @click="active='transcript'">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <rect x="6" y="9" width="4" height="4" rx="1"/>
+            <path d="M12.5 9.5h5M12.5 13.5h5"/>
+          </svg>
+          <span>Transcript</span>
+        </button>
+      </nav>
     </header>
-
-    <section class="titlebar" v-if="note">
-      <h1 class="nv-title">{{ note.title }}</h1>
-    </section>
 
     <section class="meta" v-if="note">
       <div class="created">Created: {{ new Date(note.createdAt).toLocaleString() }}</div>
-    </section>
-
-    <section class="tabs">
-      <button class="tab" :class="{active: active==='note'}" @click="active='note'">Note</button>
-      <button class="tab" :class="{active: active==='quiz'}" @click="active='quiz'">Quiz</button>
-      <button class="tab" :class="{active: active==='flash'}" @click="active='flash'">Flashcards</button>
-      <button class="tab" :class="{active: active==='transcript'}" @click="active='transcript'">Transcript</button>
     </section>
 
     <!-- Loading skeletons -->
@@ -482,48 +504,53 @@ export default {
 </script>
 
 <style scoped>
-.note-wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px 48px; color: var(--text); background: transparent; border: none; border-radius:16px; }
-.nv-topbar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0 16px; }
-.back { border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); height:36px; padding:0 12px; border-radius:10px; cursor:pointer; transition: background .2s ease, border-color .2s ease; }
-.back:hover { background: rgba(124,58,237,.12); border-color: rgba(124,58,237,.35); }
+.note-wrap { position: relative; min-height: 100vh; width: 100vw; max-width: none; margin: 0; padding: 20px 16px 48px; color: var(--text); background: #000; border: none; border-radius: 0; box-shadow: none; }
+.nv-topbar { position: sticky; top: 0; z-index: 20; display:flex; align-items:center; gap:12px; padding:10px 12px; background:#000; border-bottom:1px solid rgba(255,255,255,.08); }
+.nv-topbar .spacer { flex: 1; }
+.back { border:1px solid rgba(255,255,255,.12); background:#101012; color:var(--text); height:40px; padding:0 14px; border-radius:12px; cursor:pointer; font-weight:700; transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, transform .12s ease; box-shadow: 0 8px 20px rgba(124,58,237,.18); }
+.back:hover { background: rgba(124,58,237,.12); border-color: rgba(124,58,237,.35); box-shadow: 0 8px 22px rgba(124,58,237,.25); }
 .title { font-size:20px; font-weight:700; }
 .titlebar { padding: 6px 0 2px; }
 .nv-title { font-size: 28px; font-weight: 900; letter-spacing: -.2px; line-height: 1.2; margin-bottom: 2px; background: linear-gradient(90deg, #fff, #d9d4ff 50%, #c4b5fd); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-shadow: 0 2px 30px rgba(124,58,237,.18); }
 .meta { color: var(--muted); margin: 8px 0 14px; }
-.tabs { display:flex; gap:8px; margin:6px 0 14px; }
-.tab { height:36px; padding:0 14px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; transition: background .2s ease, box-shadow .2s ease, border-color .2s ease; }
-.tab:hover, .tab.active { box-shadow:0 0 0 2px rgba(0,212,255,.15) inset; }
-.content { background: rgba(255,255,255,.035); border:1px solid var(--line); border-radius:12px; padding:16px; box-shadow: 0 12px 30px rgba(0,0,0,.25); }
+.tabs { display:flex; gap:6px; margin:0; justify-content:flex-end; align-items:center; background: rgba(255,255,255,.92); border:1px solid rgba(0,0,0,.08); border-radius:999px; padding:6px; }
+.tab { height:40px; padding:0 16px; border-radius:12px; border:none; background:transparent; color:#111; cursor:pointer; font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:8px; transition: background .18s ease, box-shadow .18s ease, transform .12s ease, color .18s ease; }
+.tab .ico { width:18px; height:18px; opacity:.9; }
+.tab:hover { background: rgba(0,0,0,.06); transform: translateY(-1px); }
+.tab.active { background:#111; color:#fff; box-shadow: 0 6px 16px rgba(0,0,0,.35); }
+.tab.active .ico { opacity:1; }
+.content { background: #0b0b0c; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px; box-shadow: 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.03) inset; }
 .section { margin-bottom:18px; }
 .section h3 { font-size: 16px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: #c4b5fd; margin-bottom: 8px; }
-.section p { color: #e6e6f0; opacity: .95; }
+.section p { color: #e6e6f0; opacity: .95; line-height: 1.6; }
 .empty { color: var(--muted); padding:8px 0; }
 .empty.big { text-align:center; padding:40px 0; }
 .quiz-wrap { padding: 6px 0 0; }
 .quiz-head { display:flex; align-items:center; gap:12px; }
 .quiz-head .title-sm { font-weight:700; font-size:18px; }
 .quiz-head .actions { margin-left:auto; display:flex; gap:8px; }
-.ghost { height:32px; padding:0 12px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; }
-.ghost:hover { background: rgba(0,0,0,.06); border-color: rgba(124,58,237,.35); }
-.primary { height:36px; padding:0 14px; border-radius:10px; border:1px solid rgba(124,58,237,.5); background: linear-gradient(90deg,#7C3AED,#A78BFA); color:#fff; box-shadow: 0 6px 18px rgba(124,58,237,.35); cursor:pointer; }
+.ghost { height:40px; padding:0 16px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:#101012; color:var(--text); cursor:pointer; font-weight:700; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .12s ease; }
+.ghost:hover { background: #121214; border-color: rgba(124,58,237,.35); box-shadow: 0 6px 18px rgba(124,58,237,.2); }
+.primary { height:46px; padding:0 18px; border-radius:14px; border:1px solid rgba(124,58,237,.55); background: linear-gradient(90deg,#7C3AED,#A78BFA); color:#fff; box-shadow: 0 10px 26px rgba(124,58,237,.40); cursor:pointer; font-weight:800; letter-spacing:.2px; transition: transform .12s ease; }
+.primary:hover { transform: translateY(-1px); }
 .primary:disabled { opacity:.6; cursor:not-allowed; box-shadow:none }
 
 .progress { height:6px; background: rgba(255,255,255,.06); border-radius:999px; overflow:hidden; margin:12px 0 16px; border:1px solid rgba(255,255,255,.08); }
 .progress .bar { height:100%; background: linear-gradient(90deg, #a855f7, #7c3aed); width:0; transition: width .25s ease; }
 
-.q-card { border:1px solid var(--line); background: rgba(255,255,255,.035); border-radius:16px; padding:16px; box-shadow: 0 10px 28px rgba(0,0,0,.35); }
+.q-card { border:1px solid rgba(255,255,255,.08); background: #0b0b0c; border-radius:16px; padding:16px; box-shadow: 0 12px 30px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.03) inset; }
 .q-meta { color: var(--muted); margin-bottom:8px; }
 .q-text { font-size:18px; font-weight:700; margin-bottom:10px; }
 .opts { list-style:none; margin: 10px 0 12px; padding:0; display:flex; flex-direction:column; gap:8px; }
-.opt { display:flex; align-items:center; gap:10px; border:1px solid var(--line); background: rgba(255,255,255,.04); border-radius:12px; padding:10px 12px; cursor:pointer; transition: background .15s ease, border-color .15s ease, transform .12s ease; }
-.opt:hover { background: rgba(255,255,255,.065); border-color: rgba(255,255,255,.18); transform: translateY(-1px); }
+.opt { display:flex; align-items:center; gap:10px; border:1px solid rgba(255,255,255,.08); background: #0f0f10; border-radius:12px; padding:10px 12px; cursor:pointer; transition: background .15s ease, border-color .15s ease, transform .12s ease, box-shadow .15s ease; }
+.opt:hover { background: #121214; border-color: rgba(255,255,255,.18); transform: translateY(-1px); }
 .opt.selected { border-color: rgba(34,197,94,.6); box-shadow: 0 0 0 2px rgba(34,197,94,.25) inset; background: rgba(34,197,94,.08); }
 .opt .dot { width:10px; height:10px; border-radius:50%; background: rgba(255,255,255,.35); }
 .opt.selected .dot { background: #22c55e; }
 .q-actions { display:flex; align-items:center; gap:8px; }
 .q-actions .spacer { flex:1; }
 
-.result-card { border:1px solid var(--line); background: rgba(255,255,255,.035); border-radius:16px; padding:16px; box-shadow: 0 10px 28px rgba(0,0,0,.35); }
+.result-card { border:1px solid rgba(255,255,255,.08); background: #0b0b0c; border-radius:16px; padding:16px; box-shadow: 0 12px 30px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.03) inset; }
 .result-title { font-weight:800; font-size:20px; margin-bottom:10px; }
 .result-row { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
 .score .percent { font-size:34px; font-weight:900; letter-spacing:-0.5px; }
