@@ -3,14 +3,10 @@
     <!-- Top bar -->
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">✒️</span>
-        <span class="brand-text">turbo ai</span>
+        <span class="brand-text">SpeakApper AI</span>
       </div>
       <div class="topbar-actions">
-        <button class="theme-toggle" @click="toggleTheme" :aria-label="theme==='dark' ? 'Switch to light theme' : 'Switch to dark theme'">
-          <span v-if="theme==='dark'">🌙</span>
-          <span v-else>☀️</span>
-        </button>
+       
         <!-- Profile dropdown -->
         <div class="profile" @keydown.esc="profileMenu=false">
           <button class="avatar" @click="profileMenu=!profileMenu" :aria-expanded="profileMenu ? 'true' : 'false'" aria-haspopup="menu">
@@ -40,10 +36,7 @@
       <div v-if="sidebarOpen" class="pane-head">
         <div class="pane-logo">Boostly</div>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button class="theme-toggle" @click="toggleTheme" :aria-label="theme==='dark' ? 'Switch to light theme' : 'Switch to dark theme'">
-            <span v-if="theme==='dark'">🌙</span>
-            <span v-else>☀️</span>
-          </button>
+          
           <button class="collapse-btn" @click="toggleSidebar" aria-label="Close menu">
             <svg viewBox="0 0 24 24" width="18" height="18"><path d="M15 6 9 12l6 6" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
@@ -56,9 +49,7 @@
           <div class="uc-name">{{ userDisplayName }}</div>
           <div class="uc-mail">{{ userEmail }}</div>
         </div>
-        <div class="uc-right">
-          <button class="uc-gear" @click="goSettings" aria-label="Settings">⚙️</button>
-        </div>
+        
       </div>
       <button v-else class="rail-burger" @click="toggleSidebar" aria-label="Open menu">
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -126,33 +117,7 @@
       </section>
 
       <!-- Sidebar footer with theme toggle -->
-      <div class="pane-footer">
-        <button class="theme-toggle big" @click="toggleTheme" :aria-label="theme==='dark' ? 'Switch to light theme' : 'Switch to dark theme'">
-          <span class="ico" v-if="theme==='dark'">
-            <!-- Moon icon -->
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 1 0 9.79 9.79z" fill="currentColor"/>
-            </svg>
-          </span>
-          <span class="ico" v-else>
-            <!-- Sun icon -->
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <circle cx="12" cy="12" r="5" fill="currentColor"/>
-              <g stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <path d="M12 1v3"/>
-                <path d="M12 20v3"/>
-                <path d="M4.22 4.22l2.12 2.12"/>
-                <path d="M17.66 17.66l2.12 2.12"/>
-                <path d="M1 12h3"/>
-                <path d="M20 12h3"/>
-                <path d="M4.22 19.78l2.12-2.12"/>
-                <path d="M17.66 6.34l2.12-2.12"/>
-              </g>
-            </svg>
-          </span>
-          <span class="tt-text">{{ theme==='dark' ? 'Dark' : 'Light' }} theme</span>
-        </button>
-      </div>
+     
     </aside>
 
     <!-- Main content -->
@@ -212,16 +177,26 @@
         <div class="tabs">
           <button class="tab active">My Notes</button>
         </div>
-        <button class="btn outline" @click="createFolder">
-          <span class="btn-ico">📁</span> Create Folder
-        </button>
+        
       </section>
 
       <!-- Notes list -->
-      <section class="notes">
+      <section class="notes-list">
         <article class="note" v-for="note in filteredNotes" :key="note.id" @click="openNote(note)">
           <div class="note-ico" :class="note.type">
-            <span v-if="note.type==='audio'">🎤</span>
+            <template v-if="note.type==='audio'">
+              <!-- Microphone icon (same as quick action) -->
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-4v1a5 5 0 0 1-10 0v-1H5v1a7 7 0 0 0 6 6v3h2v-3a7 7 0 0 0 6-6v-1h-2z"/>
+              </svg>
+            </template>
+            <template v-else-if="note.type==='yt'">
+              <!-- YouTube icon (same as quick action) -->
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="yt-svg">
+                <rect x="2" y="5" width="20" height="14" rx="4" ry="4" fill="#FF0000"/>
+                <polygon points="10,9 15.5,12 10,15" fill="#FFFFFF"/>
+              </svg>
+            </template>
             <span v-else>📄</span>
           </div>
           <div class="note-body">
@@ -300,6 +275,35 @@
 
             
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upgrade to Premium Modal -->
+    <div v-if="showUpgradeModal" class="modal-wrap" @keydown.esc="closeUpgradeModal">
+      <div class="modal-backdrop" @click="closeUpgradeModal"></div>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Upgrade to Premium">
+        <div class="modal-head">
+          <div class="modal-title">Premium</div>
+          <button class="modal-close" @click="closeUpgradeModal" aria-label="Close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="premium-intro">Разблокируйте все возможности без ограничений</div>
+          <div class="pricing">
+            <div class="plan">
+              <div class="plan-name">Месяц</div>
+              <div class="plan-price"><span class="n">1</span> тг<span class="per">/мес</span></div>
+              <button class="btn primary" @click="selectPlan('monthly')">Выбрать</button>
+            </div>
+            <div class="plan best">
+              <div class="badge">Популярно</div>
+              <div class="plan-name">Год</div>
+              <div class="plan-price"><span class="n">12</span> тг<span class="per">/год</span></div>
+              <div class="note">Экономия 0%</div>
+              <button class="btn primary" @click="selectPlan('yearly')">Выбрать</button>
+            </div>
+          </div>
+          <div class="fine">Оплата — демо-заглушка. Интеграция с платежами будет добавлена позднее.</div>
         </div>
       </div>
     </div>
@@ -437,6 +441,8 @@ export default {
       // YouTube modal state
       showYoutubeModal: false,
       youtubeUrl: '',
+      // Upgrade modal state
+      showUpgradeModal: false,
       proc: {
         show: false,
         error: '',
@@ -512,6 +518,28 @@ export default {
     try { this.fetchMaterials() } catch(e) { console.warn(e) }
   },
   methods: {
+    // --- YouTube note tagging helpers (persist locally) ---
+    getYtSet() {
+      try {
+        const raw = localStorage.getItem('ytNotes')
+        const arr = Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : []
+        return new Set(arr.map(String))
+      } catch (e) { return new Set() }
+    },
+    saveYtSet(set) {
+      try { localStorage.setItem('ytNotes', JSON.stringify(Array.from(set))) } catch (e) {}
+    },
+    markNoteAsYt(id) {
+      if (!id) return
+      const s = this.getYtSet()
+      s.add(String(id))
+      this.saveYtSet(s)
+    },
+    isYt(id) {
+      if (!id) return false
+      return this.getYtSet().has(String(id))
+    },
+
     // Создает короткий осмысленный заголовок из транскрипта
     makeShortTitle(text) {
       if (!text || typeof text !== 'string') return 'Untitled note'
@@ -553,10 +581,12 @@ export default {
           const transcript = m.transcript || ''
           const title = this.makeShortTitle(m.title || transcript)
           const updated = m.updatedAt || m.updated_at || m.updated || m.createdAt || m.created_at || Date.now()
+          const id = m.id || m._id
+          const type = this.isYt(id) ? 'yt' : 'audio'
           return {
-            id: m.id || m._id,
+            id,
             title,
-            type: 'audio',
+            type,
             lastOpened: new Date(updated).toLocaleString(),
             updatedMs: new Date(updated).getTime(),
             tab: 'my',
@@ -657,6 +687,8 @@ export default {
           }
           sessionStorage.setItem('note:'+id, JSON.stringify(payload))
           this.proc.noteId = id
+          // mark as YouTube-originated
+          this.markNoteAsYt(id)
           // Immediately refresh user's notes list if authenticated
           try { if (localStorage.getItem('token')) { await this.fetchMaterials() } } catch(e){}
         } else {
@@ -672,6 +704,8 @@ export default {
           }
           sessionStorage.setItem('note:'+id, JSON.stringify(payload))
           this.proc.noteId = id
+          // mark as YouTube-originated
+          this.markNoteAsYt(id)
         }
         if (this.autoRedirect && this.proc.noteId) {
           setTimeout(() => { this.viewNoteNow() }, 350)
@@ -684,7 +718,13 @@ export default {
     },
     toggleSidebar(){ this.sidebarOpen = !this.sidebarOpen },
     goSettings(){ this.toast('Settings') },
-    upgrade(){ this.toast('Upgrade') },
+    upgrade(){ this.showUpgradeModal = true },
+    closeUpgradeModal(){ this.showUpgradeModal = false },
+    selectPlan(kind){
+      // Заглушка выбора тарифа. Здесь можно интегрировать платежи.
+      this.toast && this.toast('Selected plan: ' + kind)
+      this.closeUpgradeModal()
+    },
 
     toggleTheme(){
       this.applyTheme(this.theme === 'dark' ? 'light' : 'dark')
@@ -1224,11 +1264,12 @@ export default {
 .btn-ico { font-size:16px; }
 
 /* Notes */
-.notes { display:flex; flex-direction:column; gap:12px; margin-top:8px; }
+.notes-list { display:flex; flex-direction:column; gap:12px; margin-top:8px; }
 .note { display:grid; grid-template-columns:44px 1fr auto; align-items:center; gap:14px; padding:14px; border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.035); }
 .note:hover { box-shadow:0 0 0 1px rgba(0,212,255,.15) inset; }
 .note-ico { width:44px; height:44px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:18px; background:rgba(255,255,255,.05); }
 .note-ico.audio { background: rgba(255,255,255,.05); }
+.note-ico svg { width:20px; height:20px; fill: currentColor; }
 .note-title { font-weight:700; }
 .note-meta { color:var(--muted); font-size:12px; }
 .note-more { height:32px; width:32px; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; }
@@ -1257,14 +1298,17 @@ export default {
 [data-theme='light'] .note { background: rgba(0,0,0,.03); }
 [data-theme='light'] .note-ico { background: rgba(0,0,0,.05); }
 
-/* --- Audio modal --- */
-.modal-wrap { position: fixed; inset: 0; display:flex; align-items:center; justify-content:center; z-index: 100; }
-.modal-backdrop { position:absolute; inset:0; background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
-.modal { position:relative; width:min(680px, 92vw); background: var(--panel); color: var(--text); border:1px solid var(--line); border-radius:18px; box-shadow: 0 20px 60px rgba(0,0,0,.45); overflow:hidden; }
-.modal-head { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--line); }
-.modal-title { font-weight:800; font-size:20px; }
-.modal-close { height:36px; width:36px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.06); color:var(--text); display:grid; place-items:center; }
-.modal-body { padding:20px; display:flex; flex-direction:column; gap:16px; }
+/* --- Audio/Generic modals --- */
+.modal-wrap { position: fixed; inset: 0; display:flex; align-items:center; justify-content:center; z-index: 100; padding: 16px; animation: fadeIn .18s ease; }
+.modal-backdrop { position:absolute; inset:0; background: rgba(0,0,0,.6); backdrop-filter: blur(6px); }
+.modal { position:relative; width:min(720px, 92vw); background: var(--panel); color: var(--text); border:1px solid var(--line); border-radius:18px; box-shadow: 0 24px 80px rgba(0,0,0,.55); overflow:hidden; transform-origin:center; animation: popIn .22s cubic-bezier(.22,.61,.36,1); }
+.modal-head { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--line); backdrop-filter: saturate(120%); }
+.modal-title { font-weight:800; font-size:20px; letter-spacing:.2px; }
+.modal-close { height:36px; width:36px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.06); color:var(--text); display:grid; place-items:center; transition: background .15s ease, box-shadow .15s ease, transform .08s ease; }
+.modal-close:hover { background:rgba(255,255,255,.1); box-shadow: 0 0 0 3px rgba(124,58,237,.18) inset; }
+.modal-close:focus-visible { outline:none; box-shadow: 0 0 0 3px rgba(0,212,255,.35) inset; }
+.modal-body { padding:20px; display:flex; flex-direction:column; gap:16px; max-height: min(70vh, 640px); overflow:auto; }
+.modal-body .note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rec-center { display:grid; place-items:center; padding:24px 0; }
 .mic-btn { width:84px; height:84px; border-radius:50%; display:grid; place-items:center; border:2px solid rgba(255,255,255,.2); background: rgba(255,255,255,.05); color: var(--text); cursor:pointer; box-shadow: 0 0 0 6px rgba(124,58,237,.12); }
 .mic-btn.recording { background:#ef4444; box-shadow: 0 0 0 6px rgba(239,68,68,.2); }
@@ -1277,14 +1321,27 @@ export default {
 .btn-ghost.disabled { opacity:.5; pointer-events:none }
 .audio-preview { margin-top:8px; }
 
-[data-theme='light'] .modal { background: #fff; }
+[data-theme='light'] .modal { background: #fff; box-shadow: 0 24px 64px rgba(0,0,0,.18); }
 
 /* Processing modal extras */
-.modal-backdrop { position: absolute; inset:0; background: rgba(0,0,0,.5); backdrop-filter: blur(2px); z-index:0; }
+.modal-backdrop { position: absolute; inset:0; background: rgba(0,0,0,.6); backdrop-filter: blur(6px); z-index:0; }
 .steps { display:flex; flex-direction:column; gap:10px; margin-top:8px; }
 .step-item { display:grid; grid-template-columns:28px 1fr auto; align-items:center; gap:12px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background: rgba(255,255,255,.035); }
 .step-item .left { display:grid; place-items:center; }
 .step-item .left.glow .num { box-shadow: 0 0 0 6px rgba(0,212,255,.12); border-color: rgba(0,212,255,.45); }
+
+/* Premium modal */
+.premium-intro { text-align:center; color:var(--muted); margin-top:2px; }
+.pricing { display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:12px; }
+.plan { position:relative; display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:14px; border:1px solid var(--line); background: rgba(255,255,255,.035); align-items:center; text-align:center; }
+.plan.best { background: linear-gradient(180deg, rgba(124,58,237,.12), rgba(124,58,237,.06)); border-color: rgba(124,58,237,.4); box-shadow: 0 10px 26px rgba(124,58,237,.2); }
+.plan .badge { position:absolute; top:10px; right:10px; font-size:10px; padding:3px 8px; border-radius:999px; background:#6227e9; color:#fff; border:1px solid rgba(255,255,255,.25); }
+.plan-name { font-weight:800; letter-spacing:.3px; }
+.plan-price { font-weight:900; font-size:20px; }
+.plan-price .n { font-size:34px; line-height:1; margin-right:6px; }
+.plan-price .per { color: var(--muted); font-size:12px; margin-left:6px; }
+.plan .note { color: var(--muted); font-size:12px; margin-top:-4px; }
+.fine { color: var(--muted); font-size:12px; margin-top:12px; text-align:center; }
 .num { width:22px; height:22px; border-radius:999px; display:grid; place-items:center; background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); font-size:12px; font-weight:800; }
 .stitle { font-weight:700; }
 .sdesc { color: var(--muted); font-size:12px; margin-top:4px; }
@@ -1293,6 +1350,8 @@ export default {
 .badge.ok { background: rgba(34,197,94,.15); border-color: rgba(34,197,94,.35); color:#10B981; }
 .spinner { width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,.2); border-top-color:#7C3AED; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg) } }
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes popIn { from { opacity:.6; transform: scale(.98) } to { opacity:1; transform: scale(1) } }
 /* Ensure modal sits above backdrop */
 .modal { position: relative; z-index: 1; }
 .progress-line { height:8px; background: rgba(255,255,255,.08); border-radius:999px; border:1px solid var(--line); overflow:hidden; margin-top:6px; }

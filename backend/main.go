@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +35,127 @@ type User struct {
 	Email     string    `json:"email"`
 	Password  string    `json:"-"` // Не отправляем пароль в JSON
 	CreatedAt time.Time `json:"createdAt"`
+	// Поля подписки (Lemon Squeezy)
+	Premium          bool      `bson:"premium,omitempty" json:"premium"`
+	Plan             string    `bson:"plan,omitempty" json:"plan,omitempty"`
+	LsSubscriptionID string    `bson:"ls_subscription_id,omitempty" json:"ls_subscription_id,omitempty"`
+	CurrentPeriodEnd time.Time `bson:"current_period_end,omitempty" json:"current_period_end,omitempty"`
+}
+
+// Lemon Squeezy webhook secret (set via env)
+var lemonWebhookSecret string
+
+// handleLemonWebhook verifies signature and updates user's premium status
+func handleLemonWebhook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if lemonWebhookSecret == "" {
+		http.Error(w, "Webhook secret not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Read raw body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Verify HMAC SHA256 signature from X-Signature header
+	sigHex := r.Header.Get("X-Signature")
+	if sigHex == "" {
+		http.Error(w, "Missing signature", http.StatusUnauthorized)
+		return
+	}
+	mac := hmac.New(sha256.New, []byte(lemonWebhookSecret))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(strings.ToLower(sigHex)), []byte(strings.ToLower(expected))) {
+		http.Error(w, "Invalid signature", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse payload
+	var payload struct {
+		Meta struct {
+			EventName  string                 `json:"event_name"`
+			CustomData map[string]interface{} `json:"custom_data"`
+		} `json:"meta"`
+		Data struct {
+			ID         string `json:"id"`
+			Attributes struct {
+				Status    string     `json:"status"`
+				UserEmail string     `json:"user_email"`
+				RenewsAt  *time.Time `json:"renews_at"`
+				EndsAt    *time.Time `json:"ends_at"`
+				VariantID int64      `json:"variant_id"`
+				ProductID int64      `json:"product_id"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	event := payload.Meta.EventName
+	email := payload.Data.Attributes.UserEmail
+	if email == "" && payload.Meta.CustomData != nil {
+		if v, ok := payload.Meta.CustomData["email"].(string); ok {
+			email = v
+		}
+	}
+	if email == "" {
+		// No email to map user
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+		return
+	}
+
+	// Determine premium status
+	premium := false
+	plan := ""
+	periodEnd := time.Time{}
+	switch strings.ToLower(event) {
+	case "subscription_created", "subscription_resumed", "subscription_updated", "order_created":
+		if strings.ToLower(payload.Data.Attributes.Status) == "active" || payload.Data.Attributes.RenewsAt != nil {
+			premium = true
+		}
+		if payload.Data.Attributes.EndsAt != nil {
+			periodEnd = *payload.Data.Attributes.EndsAt
+		} else if payload.Data.Attributes.RenewsAt != nil {
+			periodEnd = *payload.Data.Attributes.RenewsAt
+		}
+	case "subscription_cancelled", "subscription_expired":
+		premium = false
+		if payload.Data.Attributes.EndsAt != nil {
+			periodEnd = *payload.Data.Attributes.EndsAt
+		}
+	}
+
+	// Update user by email in MongoDB
+	coll := database.Collection("users")
+	update := bson.M{
+		"$set": bson.M{
+			"premium":            premium,
+			"plan":               plan,
+			"ls_subscription_id": payload.Data.ID,
+			"current_period_end": periodEnd,
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := coll.UpdateOne(ctx, bson.M{"email": email}, update); err != nil {
+		log.Printf("lemon webhook: update user error: %v", err)
+		http.Error(w, "DB update error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
 }
 
 // Transcribe YouTube by URL using yt-dlp + Whisper
@@ -374,34 +498,34 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 
 	var payload GeneratePayload
 	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payload); err != nil {
-        clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
-        clean = strings.TrimPrefix(clean, "```json")
-        clean = strings.TrimPrefix(clean, "```")
-        clean = strings.TrimSuffix(clean, "```")
-        clean = strings.TrimSpace(clean)
-        if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
-            // Попытка 3: извлечь JSON по первым и последним фигурным скобкам
-            raw := openaiResp.Choices[0].Message.Content
-            i := strings.Index(raw, "{")
-            j := strings.LastIndex(raw, "}")
-            parsed := false
-            if i >= 0 && j > i {
-                candidate := strings.TrimSpace(raw[i : j+1])
-                // Нормализация известных нестандартных ключей от модели
-                candidate = strings.ReplaceAll(candidate, "\"example?\"", "\"example\"")
-                if err3 := json.Unmarshal([]byte(candidate), &payload); err3 == nil {
-                    log.Printf("[handleGenerateAndSave] Parsed AI JSON via brace-extract normalization")
-                    parsed = true
-                } else {
-                    log.Printf("[handleGenerateAndSave] Unmarshal failed after brace-extract: %v", err3)
-                }
-            }
-            if !parsed {
-                // Не валидный JSON: фиксируем и переходим к бэкенд-фоллбеку ниже
-                log.Printf("[handleGenerateAndSave] Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
-            }
-        }
-    }
+		clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+		clean = strings.TrimPrefix(clean, "```json")
+		clean = strings.TrimPrefix(clean, "```")
+		clean = strings.TrimSuffix(clean, "```")
+		clean = strings.TrimSpace(clean)
+		if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
+			// Попытка 3: извлечь JSON по первым и последним фигурным скобкам
+			raw := openaiResp.Choices[0].Message.Content
+			i := strings.Index(raw, "{")
+			j := strings.LastIndex(raw, "}")
+			parsed := false
+			if i >= 0 && j > i {
+				candidate := strings.TrimSpace(raw[i : j+1])
+				// Нормализация известных нестандартных ключей от модели
+				candidate = strings.ReplaceAll(candidate, "\"example?\"", "\"example\"")
+				if err3 := json.Unmarshal([]byte(candidate), &payload); err3 == nil {
+					log.Printf("[handleGenerateAndSave] Parsed AI JSON via brace-extract normalization")
+					parsed = true
+				} else {
+					log.Printf("[handleGenerateAndSave] Unmarshal failed after brace-extract: %v", err3)
+				}
+			}
+			if !parsed {
+				// Не валидный JSON: фиксируем и переходим к бэкенд-фоллбеку ниже
+				log.Printf("[handleGenerateAndSave] Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
+			}
+		}
+	}
 
 	// Ensure non-nil slices
 	if payload.Flashcards == nil {
@@ -425,8 +549,12 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 		freq := map[string]int{}
 		for _, w := range wordsArr {
 			w = trimPunct(w)
-			if len(w) < 3 { continue }
-			if _, ok := stop[w]; ok { continue }
+			if len(w) < 3 {
+				continue
+			}
+			if _, ok := stop[w]; ok {
+				continue
+			}
 			freq[w]++
 		}
 		// выбрать до 3 наиболее частых слов без сортировки
@@ -438,13 +566,17 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 					best, bestN = k, n
 				}
 			}
-			if best != "" { delete(m, best) }
+			if best != "" {
+				delete(m, best)
+			}
 			return best
 		}
 		termsSel := []string{}
 		for i := 0; i < 3; i++ {
 			w := pickMax(freq)
-			if w == "" { break }
+			if w == "" {
+				break
+			}
 			termsSel = append(termsSel, w)
 		}
 		if len(termsSel) == 0 {
@@ -458,20 +590,24 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 				Definition: "Ключевой термин из транскрипта; уточните детали по контексту.",
 				Example:    fmt.Sprintf("В тексте упоминается ‘%s’.", t),
 			})
-			if len(fallbackCards) >= 3 { break }
+			if len(fallbackCards) >= 3 {
+				break
+			}
 		}
 		// вопросы True/False
 		fallbackQuiz := make([]QuizQuestion, 0, 3)
 		for _, t := range termsSel {
 			q := QuizQuestion{
-				Type:      "TF",
-				Question:  fmt.Sprintf("В транскрипте упоминается ‘%s’?", t),
-				Options:   []string{"True", "False"},
-				Answer:    "True",
+				Type:       "TF",
+				Question:   fmt.Sprintf("В транскрипте упоминается ‘%s’?", t),
+				Options:    []string{"True", "False"},
+				Answer:     "True",
 				Difficulty: "easy",
 			}
 			fallbackQuiz = append(fallbackQuiz, q)
-			if len(fallbackQuiz) >= 3 { break }
+			if len(fallbackQuiz) >= 3 {
+				break
+			}
 		}
 		if len(fallbackQuiz) == 0 {
 			fallbackQuiz = []QuizQuestion{
@@ -617,15 +753,19 @@ func getMaterialByID(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	ff := mat.Flashcards
-	if ff == nil { ff = []Flashcard{} }
+	if ff == nil {
+		ff = []Flashcard{}
+	}
 	qq := mat.Quiz
-	if qq == nil { qq = []QuizQuestion{} }
+	if qq == nil {
+		qq = []QuizQuestion{}
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "material": map[string]interface{}{
-		"id": mat.ID,
-		"user_id": mat.UserID,
+		"id":         mat.ID,
+		"user_id":    mat.UserID,
 		"transcript": mat.Transcript,
 		"flashcards": ff,
-		"quiz": qq,
+		"quiz":       qq,
 		"created_at": mat.CreatedAt,
 		"updated_at": mat.UpdatedAt,
 	}})
@@ -733,16 +873,16 @@ func (s *FlexString) UnmarshalJSON(b []byte) error {
 }
 
 type QuizQuestion struct {
-	ID         FlexString `json:"id,omitempty"`
-	Type       string     `json:"type,omitempty"` // MCQ, MSQ, CLOZE, TF, MATCHING, SHORT
-	Question   string     `json:"question"`
-	Options    []string   `json:"options,omitempty"`    // MCQ/MSQ/TF/CLOZE
-	Answer     string     `json:"answer,omitempty"`     // Верный ответ для MCQ/TF/SHORT/CLOZE
+	ID         FlexString  `json:"id,omitempty"`
+	Type       string      `json:"type,omitempty"` // MCQ, MSQ, CLOZE, TF, MATCHING, SHORT
+	Question   string      `json:"question"`
+	Options    []string    `json:"options,omitempty"`    // MCQ/MSQ/TF/CLOZE
+	Answer     string      `json:"answer,omitempty"`     // Верный ответ для MCQ/TF/SHORT/CLOZE
 	Correct    interface{} `json:"correct,omitempty"`    // Может быть bool (TF/MCQ) или []string (MSQ)
-	Pairs      [][]string `json:"pairs,omitempty"`      // MATCHING: массив пар [[left,right], ...]
-	Rationale  string     `json:"rationale,omitempty"`  // Объяснение
-	Difficulty string     `json:"difficulty,omitempty"` // easy|medium|hard
-	Citation   string     `json:"citation,omitempty"`   // Цитата/ссылка на фрагмент транскрипта
+	Pairs      [][]string  `json:"pairs,omitempty"`      // MATCHING: массив пар [[left,right], ...]
+	Rationale  string      `json:"rationale,omitempty"`  // Объяснение
+	Difficulty string      `json:"difficulty,omitempty"` // easy|medium|hard
+	Citation   string      `json:"citation,omitempty"`   // Цитата/ссылка на фрагмент транскрипта
 }
 
 type GeneratePayload struct {
@@ -822,9 +962,13 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 		var responseMaterials []map[string]interface{}
 		for _, mat := range materials {
 			f := mat.Flashcards
-			if f == nil { f = []Flashcard{} }
+			if f == nil {
+				f = []Flashcard{}
+			}
 			q := mat.Quiz
-			if q == nil { q = []QuizQuestion{} }
+			if q == nil {
+				q = []QuizQuestion{}
+			}
 			responseMaterials = append(responseMaterials, map[string]interface{}{
 				"id":         mat.ID.Hex(),
 				"transcript": mat.Transcript,
@@ -856,8 +1000,12 @@ func handleMaterials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Default nil to empty slices
-	if materialData.Flashcards == nil { materialData.Flashcards = []Flashcard{} }
-	if materialData.Quiz == nil { materialData.Quiz = []QuizQuestion{} }
+	if materialData.Flashcards == nil {
+		materialData.Flashcards = []Flashcard{}
+	}
+	if materialData.Quiz == nil {
+		materialData.Quiz = []QuizQuestion{}
+	}
 
 	// Create material
 	material := Material{
@@ -1340,6 +1488,12 @@ func main() {
 		log.Println("⚠️  JWT_SECRET не задан, используется небезопасный дефолтный ключ. Задайте JWT_SECRET в окружении!")
 	}
 
+	// Lemon Squeezy webhook secret
+	lemonWebhookSecret = os.Getenv("LEMONSQUEEZY_WEBHOOK_SECRET")
+	if lemonWebhookSecret == "" {
+		log.Println("⚠️  LEMONSQUEEZY_WEBHOOK_SECRET не задан. Вебхук будет отклонять запросы.")
+	}
+
 	// Подключаемся к MongoDB
 	if err := ConnectDB(); err != nil {
 		log.Fatal("❌ Ошибка подключения к MongoDB:", err)
@@ -1378,6 +1532,9 @@ func main() {
 	r.HandleFunc("/api/generate-and-save", handleGenerateAndSave).Methods("POST")
 	r.HandleFunc("/api/materials/{id}", getMaterialByID).Methods("GET")
 	r.HandleFunc("/api/notes/{id}", getNoteByID).Methods("GET")
+
+	// Lemon Squeezy webhook endpoint
+	r.HandleFunc("/api/lemonsqueezy/webhook", handleLemonWebhook).Methods("POST")
 
 	// Применяем CORS middleware
 	handler := corsMiddleware(r)

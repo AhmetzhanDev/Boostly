@@ -84,7 +84,7 @@
     <header class="header">
       <div class="container">
         <div class="logo">
-          <h1>SpeakApper</h1>
+          <h1>SpeakApper AI</h1>
         </div>
         <nav class="nav">
           <a href="#" @click="primaryCtaClick" class="nav-link">{{ isAuthed ? 'Dashboard' : 'Start now' }}</a>
@@ -100,7 +100,7 @@
           <div class="hero-text">
             <h2 class="hero-title">Trusted by 4M+ users</h2>
             <h1 class="hero-heading">
-              Meet SpeakApper<br>
+              Meet SpeakApper AI<br>
               <span class="highlight">AI </span>
             </h1>
             <p class="hero-subtitle">Your smartest friend, right in your notes.</p>
@@ -121,7 +121,7 @@
             </div>
             <div class="document-preview">
               <div class="document-header">
-                <div class="doc-title">Document showing SpeakApper comments and edits</div>
+                <div class="doc-title">Document showing SpeakApper AI comments and edits</div>
               </div>
               <div class="document-content">
                 <div class="text-line"></div>
@@ -137,7 +137,7 @@
     <!-- Trusted By Section -->
     <section class="trusted-by">
       <div class="container">
-        <h3 class="fade-in-on-scroll">SpeakApper is trusted by students and professionals at...</h3>
+        <h3 class="fade-in-on-scroll">SpeakApper AI is trusted by students and professionals at...</h3>
         <div class="logos-grid">
           <div class="logo-item fade-in-on-scroll">Google</div>
           <div class="logo-item fade-in-on-scroll">Harvard University</div>
@@ -157,7 +157,7 @@
     <section class="main-features">
       <div class="container">
         <h2 class="section-title fade-in-on-scroll">The last notetaker you'll ever need</h2>
-        <p class="section-subtitle fade-in-on-scroll">SpeakApper records live, edits, comments and collaborates like a real assistant.</p>
+        <p class="section-subtitle fade-in-on-scroll">SpeakApper AI records live, edits, comments and collaborates like a real assistant.</p>
         
         <div class="features-grid">
           <div class="feature-card slide-in-left-on-scroll">
@@ -186,8 +186,8 @@
               </div>
             </div>
             <h3>Live collaboration</h3>
-            <p>SpeakApper actively works alongside you — editing your doc, highlighting issues, adding AI comments.</p>
-            <p class="additional-info neon-glow">SpeakApper is available to chat all the time — the perfect teammate.</p>
+            <p>SpeakApper AI actively works alongside you — editing your doc, highlighting issues, adding AI comments.</p>
+            <p class="additional-info neon-glow">SpeakApper AI is available to chat all the time — the perfect teammate.</p>
           </div>
 
           <div class="feature-card slide-in-left-on-scroll">
@@ -216,7 +216,7 @@
               </div>
             </div>
             <h3>All your devices. Always synced.</h3>
-            <p>SpeakApper works on the web and mobile. Desktop app coming next month!</p>
+            <p>SpeakApper AI works on the web and mobile. Desktop app coming next month!</p>
           </div>
         </div>
       </div>
@@ -232,7 +232,7 @@
               <h4>Harvard Pre-med</h4>
               <p class="testimonial-author">— Olivia C.</p>
             </div>
-            <p>"My bio textbook is 500 pages, but SpeakApper makes podcasts of each chapter so I can listen during my long commutes or workouts."</p>
+            <p>"My bio textbook is 500 pages, but SpeakApper AI makes podcasts of each chapter so I can listen during my long commutes or workouts."</p>
           </div>
 
           <div class="testimonial-card fade-in-on-scroll">
@@ -240,7 +240,7 @@
               <h4>Mom (4 kids, 2 dogs)</h4>
               <p class="testimonial-author">— Danielle T.</p>
             </div>
-            <p>"I always wanted to journal but was never consistent—life just got busy. Now I just talk to SpeakApper for 2 mins every night, and it turns my thoughts into neat daily entries automatically."</p>
+            <p>"I always wanted to journal but was never consistent—life just got busy. Now I just talk to SpeakApper AI for 2 mins every night, and it turns my thoughts into neat daily entries automatically."</p>
           </div>
 
           <div class="testimonial-card fade-in-on-scroll">
@@ -248,7 +248,7 @@
               <h4>MIT Education PhD</h4>
               <p class="testimonial-author">— Elena R.</p>
             </div>
-            <p>"SpeakApper outlines my research paper, then I go use my voice to tell it how I want each paragraph. I do the thinking, and SpeakApper does the writing."</p>
+            <p>"SpeakApper AI outlines my research paper, then I go use my voice to tell it how I want each paragraph. I do the thinking, and SpeakApper AI does the writing."</p>
           </div>
 
           <div class="testimonial-card fade-in-on-scroll">
@@ -256,7 +256,7 @@
               <h4>Meta Product Manager</h4>
               <p class="testimonial-author">— Priya D.</p>
             </div>
-            <p>"I love asking SpeakApper for comments on all my docs. I tell it to be a brutally honest user, and it gives great in-line feedback."</p>
+            <p>"I love asking SpeakApper AI for comments on all my docs. I tell it to be a brutally honest user, and it gives great in-line feedback."</p>
           </div>
 
           <div class="testimonial-card fade-in-on-scroll">
@@ -264,7 +264,7 @@
               <h4>Yale Law Student</h4>
               <p class="testimonial-author">— Marcus O.</p>
             </div>
-            <p>"Case law used to overwhelm me, but SpeakApper instantly turns my readings into flashcards and quizzes. Now I can actually keep up daily instead of cramming all night before exams."</p>
+            <p>"Case law used to overwhelm me, but SpeakApper AI instantly turns my readings into flashcards and quizzes. Now I can actually keep up daily instead of cramming all night before exams."</p>
           </div>
 
           <div class="testimonial-card fade-in-on-scroll">
@@ -272,7 +272,7 @@
               <h4>McKinsey Consultant</h4>
               <p class="testimonial-author">— Jason A.</p>
             </div>
-            <p>"SpeakApper makes podcasts of each chapter so I can listen during my long commutes or workouts."</p>
+            <p>"SpeakApper AI makes podcasts of each chapter so I can listen during my long commutes or workouts."</p>
           </div>
         </div>
       </div>
@@ -282,7 +282,7 @@
     <section class="final-cta">
       <div class="container">
         <div class="cta-content">
-          <div class="logo-large floating">SpeakApper</div>
+          <div class="logo-large floating">SpeakApper AI</div>
           <h2 class="fade-in-on-scroll">Never write alone again</h2>
           <button class="btn btn-primary btn-large neon-glow" @click="goToSignup">Get Started - It's Free</button>
         </div>
@@ -296,8 +296,8 @@
           <div class="footer-section">
             <h4>Products</h4>
             <ul>
-              <li><a href="#">App Store</a></li>
-              <li><a href="#">Google Play</a></li>
+              <li><a href="https://apps.apple.com/kz/app/speak-apper-ai-transcribe/id6742684807">App Store</a></li>
+              <li><a href="#">Web-site</a></li>
             </ul>
           </div>
           <div class="footer-section">
@@ -316,7 +316,7 @@
           </div>
         </div>
         <div class="footer-bottom">
-          <p>© 2025 SpeakApper LLC. All rights reserved.</p>
+          <p>© 2025 SpeakApper AI LLC. All rights reserved.</p>
         </div>
       </div>
     </footer>

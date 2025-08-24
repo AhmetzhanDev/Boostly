@@ -6,6 +6,10 @@
       <div style="width:72px"></div>
     </header>
 
+    <section class="titlebar" v-if="note">
+      <h1 class="nv-title">{{ note.title }}</h1>
+    </section>
+
     <section class="meta" v-if="note">
       <div class="created">Created: {{ new Date(note.createdAt).toLocaleString() }}</div>
     </section>
@@ -117,10 +121,39 @@
         <div v-if="active==='flash'" key="flash">
         <h3>Flashcards</h3>
         <div v-if="(note.flashcards || []).length===0" class="empty">No flashcards</div>
-        <div class="cards">
-          <div v-for="(c, i) in note.flashcards" :key="i" class="card">
-            <div class="front">{{ c.front || c.term || ('Card #' + (i+1)) }}</div>
-            <div class="back">{{ c.back || c.definition || c.meaning }}</div>
+        <div v-else class="study">
+          <div class="study-controls">
+            <button class="btn ghost" @click="shuffleCards" :disabled="count<=1">Shuffle</button>
+            <div class="progress">Card {{ study.index + 1 }} of {{ count }}</div>
+            <button class="btn ghost" @click="resetOrder" :disabled="count<=1">Reset</button>
+          </div>
+
+          <div
+            class="card study-card"
+            :class="{ flipped: flipped.has(currentIdx) }"
+            @click="toggleFlip(currentIdx)"
+            role="button"
+            :aria-pressed="flipped.has(currentIdx) ? 'true' : 'false'"
+            tabindex="0"
+            @keydown.enter.prevent="toggleFlip(currentIdx)"
+            @keydown.space.prevent="toggleFlip(currentIdx)"
+          >
+            <div class="card-inner">
+              <div class="card-face front">
+                <div class="fc-title">{{ currentCard.front || currentCard.term || ('Card #' + (study.index+1)) }}</div>
+                <div v-if="currentCard.example" class="fc-example">{{ currentCard.example }}</div>
+              </div>
+              <div class="card-face back">
+                <div class="fc-back-title">Definition</div>
+                <div class="fc-text">{{ currentCard.back || currentCard.definition || currentCard.meaning }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="study-nav">
+            <button class="btn" @click="prevCard" :disabled="count===0">Previous</button>
+            <span class="hint">Press to flip</span>
+            <button class="btn" @click="nextCard" :disabled="count===0">Next</button>
           </div>
         </div>
         </div>
@@ -147,6 +180,9 @@ export default {
       active: 'note',
       note: null,
       loading: true,
+      // Индексы перевёрнутых карточек
+      flipped: new Set(),
+      study: { order: [], index: 0 },
       quizUi: {
         index: 0,
         // для MCQ: selected = number | null; для MSQ используем selectedMulti: Set
@@ -159,13 +195,28 @@ export default {
     }
   },
   computed: {
+    // Flashcards study view
+    count() {
+      const list = (this.note && this.note.flashcards) ? this.note.flashcards : []
+      return Array.isArray(list) ? list.length : 0
+    },
+    currentIdx() {
+      if (!this.study.order.length) return 0
+      const idx = this.study.order[this.study.index] ?? 0
+      return Math.min(Math.max(0, idx), Math.max(0, this.count - 1))
+    },
+    currentCard() {
+      const list = (this.note && this.note.flashcards) ? this.note.flashcards : []
+      return list[this.currentIdx] || {}
+    },
+    // Note summary
     summary() {
       if (!this.note || !this.note.transcript) return '—'
       const t = this.note.transcript.trim()
-      // naive summary: first 2 sentences or 300 chars
       const parts = t.split(/[.!?]\s+/).slice(0, 2).join('. ')
       return (parts || t).slice(0, 300)
     },
+    // Quiz computed
     currentQuestion() {
       return (this.quizList[this.quizUi.index] || {})
     },
@@ -182,7 +233,6 @@ export default {
       return Math.round((answered / this.quizList.length) * 100)
     },
     results() {
-      // вычисляем результат по сохранённым ответам
       let correct = 0
       const wrongItems = []
       this.quizUi.answers.forEach((entry) => {
@@ -191,10 +241,8 @@ export default {
         const truth = Array.isArray(q.correct) && q.correct.length
           ? q.correct
           : (typeof q.answer === 'number' ? [q.answer] : [q.options ? q.options.indexOf(q.answer) : -1])
-
         const compareAs = (val) => Array.isArray(val) ? [...val].sort().join(',') : String(val)
         const normalize = (arr) => arr.filter(x => x !== -1 && x !== undefined && x !== null)
-
         let your = entry.value
         let isCorrect = false
         if (Array.isArray(your)) {
@@ -206,7 +254,6 @@ export default {
           const tIndex = (typeof tIdx === 'number') ? tIdx : (q.options ? q.options.indexOf(tIdx) : -1)
           isCorrect = Number(your) === Number(tIndex)
         }
-
         if (isCorrect) correct++
         else {
           const yourText = Array.isArray(entry.value)
@@ -223,6 +270,15 @@ export default {
     scorePercent() {
       if (!this.quizList.length) return 0
       return Math.round((this.results.correct / this.quizList.length) * 100)
+    }
+  },
+  watch: {
+    active(val) {
+      if (val === 'flash') this.initStudyOrder()
+    },
+    note: {
+      handler() { this.initStudyOrder() },
+      deep: true
     }
   },
   created() {
@@ -260,6 +316,42 @@ export default {
     })
   },
   methods: {
+    // Study view controls
+    toggleFlip(i) {
+      const s = new Set(this.flipped)
+      if (s.has(i)) s.delete(i)
+      else s.add(i)
+      this.flipped = s
+    },
+    initStudyOrder() {
+      const n = this.count
+      this.study.order = Array.from({ length: n }, (_, i) => i)
+      this.study.index = 0
+      this.flipped = new Set()
+    },
+    shuffleCards() {
+      const arr = Array.from({ length: this.count }, (_, i) => i)
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[arr[i], arr[j]] = [arr[j], arr[i]]
+      }
+      this.study.order = arr
+      this.study.index = 0
+      this.flipped = new Set()
+    },
+    resetOrder() {
+      this.initStudyOrder()
+    },
+    nextCard() {
+      if (this.count === 0) return
+      this.study.index = (this.study.index + 1) % this.count
+      this.flipped = new Set()
+    },
+    prevCard() {
+      if (this.count === 0) return
+      this.study.index = (this.study.index - 1 + this.count) % this.count
+      this.flipped = new Set()
+    },
     normalizeQuiz(list) {
       try {
         const out = []
@@ -390,37 +482,40 @@ export default {
 </script>
 
 <style scoped>
-.note-wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px 48px; color:#fff; background: #0b0b0b; }
+.note-wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px 48px; color: var(--text); background: transparent; border: none; border-radius:16px; }
 .nv-topbar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0 16px; }
-.back { border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06); color:#fff; height:36px; padding:0 12px; border-radius:10px; cursor:pointer; transition: background .2s ease, border-color .2s ease; }
+.back { border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); height:36px; padding:0 12px; border-radius:10px; cursor:pointer; transition: background .2s ease, border-color .2s ease; }
 .back:hover { background: rgba(124,58,237,.12); border-color: rgba(124,58,237,.35); }
 .title { font-size:20px; font-weight:700; }
-.meta { color:#b0b0b0; margin: 8px 0 14px; }
-.tabs { display:flex; gap:10px; border-bottom:1px solid rgba(255,255,255,.12); margin-bottom:16px; position:sticky; top:0; z-index:2; backdrop-filter: blur(6px); }
-.tab { height:36px; padding:0 14px; border-radius:10px 10px 0 0; background:transparent; color:#b0b0b0; border:1px solid transparent; cursor:pointer; transition: color .2s ease, background .2s ease, box-shadow .2s ease; }
-.tab:hover { color:#fff; }
-.tab.active { color:#fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); border-bottom-color: transparent; box-shadow: 0 6px 18px rgba(124,58,237,.25) inset; }
-.content { background: rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:16px; box-shadow: 0 12px 30px rgba(0,0,0,.25); backdrop-filter: blur(4px); }
+.titlebar { padding: 6px 0 2px; }
+.nv-title { font-size: 28px; font-weight: 900; letter-spacing: -.2px; line-height: 1.2; margin-bottom: 2px; background: linear-gradient(90deg, #fff, #d9d4ff 50%, #c4b5fd); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-shadow: 0 2px 30px rgba(124,58,237,.18); }
+.meta { color: var(--muted); margin: 8px 0 14px; }
+.tabs { display:flex; gap:8px; margin:6px 0 14px; }
+.tab { height:36px; padding:0 14px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; transition: background .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.tab:hover, .tab.active { box-shadow:0 0 0 2px rgba(0,212,255,.15) inset; }
+.content { background: rgba(255,255,255,.035); border:1px solid var(--line); border-radius:12px; padding:16px; box-shadow: 0 12px 30px rgba(0,0,0,.25); }
 .section { margin-bottom:18px; }
-.empty { color:#b0b0b0; padding:8px 0; }
+.section h3 { font-size: 16px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: #c4b5fd; margin-bottom: 8px; }
+.section p { color: #e6e6f0; opacity: .95; }
+.empty { color: var(--muted); padding:8px 0; }
 .empty.big { text-align:center; padding:40px 0; }
 .quiz-wrap { padding: 6px 0 0; }
 .quiz-head { display:flex; align-items:center; gap:12px; }
 .quiz-head .title-sm { font-weight:700; font-size:18px; }
 .quiz-head .actions { margin-left:auto; display:flex; gap:8px; }
-.ghost { height:32px; padding:0 12px; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:transparent; color:#ddd; cursor:pointer; }
-.ghost:hover { border-color: rgba(168,85,247,.55); color:#fff; background: rgba(168,85,247,.12); }
-.primary { height:36px; padding:0 14px; border-radius:12px; border:1px solid rgba(168,85,247,.8); background: linear-gradient(180deg, rgba(168,85,247,.25), rgba(168,85,247,.18)); color:#fff; cursor:pointer; box-shadow: 0 6px 18px rgba(168,85,247,.25); }
-.primary:disabled { opacity:.5; cursor:not-allowed; }
+.ghost { height:32px; padding:0 12px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; }
+.ghost:hover { background: rgba(0,0,0,.06); border-color: rgba(124,58,237,.35); }
+.primary { height:36px; padding:0 14px; border-radius:10px; border:1px solid rgba(124,58,237,.5); background: linear-gradient(90deg,#7C3AED,#A78BFA); color:#fff; box-shadow: 0 6px 18px rgba(124,58,237,.35); cursor:pointer; }
+.primary:disabled { opacity:.6; cursor:not-allowed; box-shadow:none }
 
 .progress { height:6px; background: rgba(255,255,255,.06); border-radius:999px; overflow:hidden; margin:12px 0 16px; border:1px solid rgba(255,255,255,.08); }
 .progress .bar { height:100%; background: linear-gradient(90deg, #a855f7, #7c3aed); width:0; transition: width .25s ease; }
 
-.q-card { border:1px solid rgba(255,255,255,.12); background: #0f0f10; border-radius:16px; padding:16px; box-shadow: 0 10px 28px rgba(0,0,0,.35); }
-.q-meta { color:#b0b0b0; margin-bottom:8px; }
+.q-card { border:1px solid var(--line); background: rgba(255,255,255,.035); border-radius:16px; padding:16px; box-shadow: 0 10px 28px rgba(0,0,0,.35); }
+.q-meta { color: var(--muted); margin-bottom:8px; }
 .q-text { font-size:18px; font-weight:700; margin-bottom:10px; }
 .opts { list-style:none; margin: 10px 0 12px; padding:0; display:flex; flex-direction:column; gap:8px; }
-.opt { display:flex; align-items:center; gap:10px; border:1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); border-radius:12px; padding:10px 12px; cursor:pointer; transition: background .15s ease, border-color .15s ease, transform .12s ease; }
+.opt { display:flex; align-items:center; gap:10px; border:1px solid var(--line); background: rgba(255,255,255,.04); border-radius:12px; padding:10px 12px; cursor:pointer; transition: background .15s ease, border-color .15s ease, transform .12s ease; }
 .opt:hover { background: rgba(255,255,255,.065); border-color: rgba(255,255,255,.18); transform: translateY(-1px); }
 .opt.selected { border-color: rgba(34,197,94,.6); box-shadow: 0 0 0 2px rgba(34,197,94,.25) inset; background: rgba(34,197,94,.08); }
 .opt .dot { width:10px; height:10px; border-radius:50%; background: rgba(255,255,255,.35); }
@@ -428,11 +523,11 @@ export default {
 .q-actions { display:flex; align-items:center; gap:8px; }
 .q-actions .spacer { flex:1; }
 
-.result-card { border:1px solid rgba(255,255,255,.12); background:#0f0f10; border-radius:16px; padding:16px; box-shadow: 0 10px 28px rgba(0,0,0,.35); }
+.result-card { border:1px solid var(--line); background: rgba(255,255,255,.035); border-radius:16px; padding:16px; box-shadow: 0 10px 28px rgba(0,0,0,.35); }
 .result-title { font-weight:800; font-size:20px; margin-bottom:10px; }
 .result-row { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
 .score .percent { font-size:34px; font-weight:900; letter-spacing:-0.5px; }
-.muted { color:#9aa0a6; }
+.muted { color: var(--muted); }
 .wrong-list { margin-top:12px; }
 .wrong-title { font-weight:700; margin-bottom:8px; }
 .wrong-item { border:1px dashed rgba(255,255,255,.14); border-radius:12px; padding:10px 12px; margin-bottom:8px; background: rgba(255,255,255,.03); }
@@ -442,10 +537,11 @@ export default {
 .chip.red { background: rgba(239,68,68,.12); color:#fecaca; border-color: rgba(239,68,68,.35); }
 .chip.green { background: rgba(34,197,94,.12); color:#bbf7d0; border-color: rgba(34,197,94,.35); }
 .cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; }
-.card { border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:12px; background:rgba(255,255,255,.04); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.card { border:1px solid var(--line); border-radius:12px; padding:12px; background:rgba(255,255,255,.04); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
 .card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(124,58,237,.25); border-color: rgba(124,58,237,.35); }
 .front { font-weight:700; margin-bottom:6px; }
-.transcript { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:rgba(0,0,0,.25); border-radius:10px; padding:12px; border:1px solid rgba(255,255,255,.08); }
+.transcript { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:rgba(0,0,0,.25); border-radius:12px; padding:14px; border:1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.25) inset; }
+audio { width: 100%; height: 40px; border-radius: 10px; background: rgba(255,255,255,.06); border: 1px solid var(--line); }
 
 /* Fade-slide transitions */
 .fade-slide-enter-active, .fade-slide-leave-active { transition: opacity .18s ease, transform .18s ease; }
@@ -459,4 +555,79 @@ export default {
 .skeleton.line.w60 { width: 60%; }
 .skeleton.block { height: 120px; width: 100%; border-radius: 12px; }
 @keyframes shimmer { to { transform: translateX(100%);} }
+</style>
+
+<style scoped>
+/* Study View layout */
+.study { display:flex; flex-direction: column; align-items:center; gap:18px; margin-top: 12px; }
+.study-controls { display:flex; align-items:center; gap:12px; opacity:.95; }
+.study-controls .progress { font-weight: 700; letter-spacing:.2px; opacity:.9; }
+.study-nav { display:flex; align-items:center; gap:16px; }
+.hint { opacity:.7; font-size: 12px; }
+.btn { padding:8px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); cursor:pointer; }
+.btn.ghost { background: transparent; }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+
+.study-card { width: min(680px, 96%); height: 300px; }
+@media (max-width: 600px) { .study-card { height: 240px; } }
+</style>
+
+<style scoped>
+/* Fancy flashcards */
+.cards.fancy { perspective: 1200px; gap: 16px; }
+.card { position: relative; height: 180px; border: none; background: transparent; padding: 0; }
+.card .card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform .6s cubic-bezier(.2,.8,.2,1), filter .3s ease, box-shadow .3s ease;
+}
+.card.flipped .card-inner { transform: rotateY(180deg); }
+
+.card-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 14px;
+  border-radius: 16px;
+  backface-visibility: hidden;
+  background: radial-gradient(1200px 400px at 10% -20%, rgba(168,85,247,.28), rgba(124,58,237,.14) 40%, rgba(255,255,255,.05) 70%), rgba(255,255,255,.04);
+  border: 1px solid rgba(168,85,247,.28);
+  box-shadow:
+    0 10px 30px rgba(0,0,0,.35),
+    0 0 0 1px rgba(255,255,255,.05) inset,
+    0 0 80px rgba(168,85,247,.12) inset;
+  overflow: hidden;
+}
+.card-face::after {
+  /* Shine */
+  content: "";
+  position: absolute; inset: -40%;
+  background: conic-gradient(from 180deg, rgba(168,85,247,.0), rgba(168,85,247,.25), rgba(124,58,237,.0));
+  filter: blur(22px);
+  transform: translate3d(0,0,0);
+  opacity: .35;
+  pointer-events: none;
+}
+.card .front { transform: rotateY(0deg); }
+.card .back { transform: rotateY(180deg); }
+
+.fc-title { font-weight: 800; font-size: 18px; letter-spacing: .2px; }
+.fc-example { margin-top: 6px; color: #c6b8f8; opacity: .9; font-size: 13px; }
+.fc-back-title { font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: .6px; color:#c4b5fd; margin-bottom: 6px; }
+.fc-text { font-size: 15px; line-height: 1.4; }
+
+/* Float animation */
+.card { animation: float 6s ease-in-out infinite; }
+.card:nth-child(2n) { animation-delay: .6s }
+.card:nth-child(3n) { animation-delay: 1.2s }
+@keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-4px) } }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .card, .card .card-inner { transition: none !important; animation: none !important; }
+}
 </style>
