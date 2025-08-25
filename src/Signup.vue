@@ -172,7 +172,7 @@ export default {
   methods: {
     async handleSignup() {
       try {
-        const response = await fetch('http://localhost:8080/api/signup', {
+        const response = await fetch('/api/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.formData)
@@ -223,7 +223,7 @@ export default {
           callback: async (response) => {
             if (response.error) { console.error('Ошибка авторизации Google: ' + response.error); return }
             try {
-              const serverResponse = await fetch('http://localhost:8080/api/google-signup', {
+              const serverResponse = await fetch('/api/google-signup', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token: response.access_token, idToken: response.credential })

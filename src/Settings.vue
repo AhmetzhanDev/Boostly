@@ -136,7 +136,7 @@ export default {
         // Optionally fetch fresh user data from API
         const token = localStorage.getItem('token')
         if (token) {
-          const response = await fetch('http://localhost:8080/api/user', {
+          const response = await fetch('/api/user', {
             headers: {
               'Authorization': `Bearer ${token}`
             }
@@ -156,7 +156,7 @@ export default {
         if (!token) return
 
         // Load notes count
-        const notesResponse = await fetch('http://localhost:8080/api/notes', {
+        const notesResponse = await fetch('/api/notes', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -168,7 +168,7 @@ export default {
 
         // Load materials count (if endpoint exists)
         try {
-          const materialsResponse = await fetch('http://localhost:8080/api/materials', {
+          const materialsResponse = await fetch('/api/materials', {
             headers: {
               'Authorization': `Bearer ${token}`
             }

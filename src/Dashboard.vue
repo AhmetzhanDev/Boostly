@@ -612,7 +612,7 @@ export default {
       const token = localStorage.getItem('token')
       if (!token) { this.notes = []; return }
       try {
-        const resp = await fetch('http://localhost:8080/api/materials', {
+        const resp = await fetch('/api/materials', {
           headers: { 'Authorization': 'Bearer ' + token }
         })
         if (!resp.ok) { this.notes = []; return }
@@ -650,7 +650,7 @@ export default {
         try {
           const t0 = Date.now()
           const tick = setInterval(() => { this.proc.step3.elapsed = Math.floor((Date.now()-t0)/1000) }, 1000)
-          const resp = await fetch('http://localhost:8080/api/transcribe-youtube', {
+          const resp = await fetch('/api/transcribe-youtube', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
@@ -851,7 +851,7 @@ export default {
         const isNote = note && note.type === 'note'
         const endpoint = isNote ? 'notes' : 'materials'
         
-        const response = await fetch(`http://localhost:8080/api/${endpoint}/${noteId}`, {
+        const response = await fetch(`/api/${endpoint}/${noteId}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `Bearer ${token}`
@@ -1042,7 +1042,7 @@ export default {
         const file = new File([blob], 'recording.webm', { type: blob.type || 'audio/webm' })
         form.append('audio', file)
         const xhr = new XMLHttpRequest()
-        xhr.open('POST', 'http://localhost:8080/api/transcribe')
+        xhr.open('POST', '/api/transcribe')
         xhr.upload.onprogress = (ev) => {
           if (ev.lengthComputable) {
             this.proc.step2.progress = Math.round((ev.loaded / ev.total) * 100)
@@ -1079,7 +1079,7 @@ export default {
         // Основной путь: generate-and-save с JWT и таймаутом
         if (token) {
           try {
-            const resp = await this.fetchJsonWithTimeout('http://localhost:8080/api/generate-and-save', {
+            const resp = await this.fetchJsonWithTimeout('/api/generate-and-save', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1119,7 +1119,7 @@ export default {
         }
 
         // Фоллбэк без сохранения: /api/generate с меньшим таймаутом
-        const resp2 = await this.fetchJsonWithTimeout('http://localhost:8080/api/generate', {
+        const resp2 = await this.fetchJsonWithTimeout('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ transcript })

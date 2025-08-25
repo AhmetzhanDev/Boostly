@@ -2,7 +2,6 @@
   <div class="note-wrap">
     <header class="nv-topbar">
       <button class="back" @click="$router.push('/dashboard')" aria-label="Back">← Back</button>
-      <h1 class="nv-title" v-if="note">{{ note.title }}</h1>
       <div class="spacer"></div>
       <nav class="tabs">
         <button class="tab" :class="{active: active==='note'}" @click="active='note'">
@@ -74,6 +73,9 @@
             <div class="actions">
               <button class="ghost" @click="resetQuiz">Reset</button>
               <button class="ghost" @click="shuffleQuiz">Shuffle questions</button>
+              <button class="ghost" :disabled="genLoading" @click="generateQuizFromTranscript">
+                {{ (quizList || []).length ? (genLoading ? 'Regenerating…' : 'Regenerate') : (genLoading ? 'Generating…' : 'Generate') }}
+              </button>
             </div>
           </div>
 
@@ -202,6 +204,7 @@ export default {
       active: 'note',
       note: null,
       loading: true,
+      genLoading: false,
       // Индексы перевёрнутых карточек
       flipped: new Set(),
       study: { order: [], index: 0 },
@@ -409,7 +412,7 @@ export default {
     async fetchMaterialById(id) {
       const token = localStorage.getItem('token')
       if (!token) throw new Error('No JWT')
-      const resp = await fetch(`http://localhost:8080/api/materials/${id}`, {
+      const resp = await fetch(`/api/materials/${id}`, {
         headers: { 'Authorization': 'Bearer ' + token }
       })
       if (!resp.ok) throw new Error('Failed to load material')
@@ -452,6 +455,143 @@ export default {
       }
       this.quizList = a
       this.resetQuiz()
+    },
+    buildQuizPrompt(sourceText, lang = 'ru') {
+      return [
+        'Задача: проанализируй предоставленный текст и выдели все ключевые факты, даты, определения, причинно‑следственные связи, сущности и их атрибуты. На основе извлечённых данных сгенерируй набор вопросов, который полно и без избыточности покрывает важный материал.',
+        '',
+        'Требования:',
+        '- Сгенерируй столько вопросов, сколько объективно нужно для полного охвата содержания. Не придумывай то, чего нет в тексте.',
+        '- Чередуй типы вопросов: 1) один правильный ответ + правдоподобные дистракторы, 2) True/False, 3) с пропуском ключевого слова (cloze).',
+        '- Формулируй вопросы кратко и ясно.',
+        '- Дистракторы правдоподобные и тематически близкие.',
+        '- Для cloze используй ровно один пропуск «_____». Ответ должен точно соответствовать пропуску.',
+        '- Не повторяй по смыслу одинаковые вопросы.',
+        '- Сохраняй важные числа/даты/определения.',
+        `- Язык вывода: ${lang}.`,
+        '',
+        'Формат вывода строго в JSON:',
+        '{',
+        '  "questions": [',
+        '    {',
+        '      "type": "mcq" | "true_false" | "cloze",',
+        '      "question": "текст вопроса",',
+        '      "options": ["A", "B", "C", "D"],',
+        '      "answer": "строка или true/false",',
+        '      "explanation": "краткое обоснование из текста"',
+        '    }',
+        '  ],',
+        '  "coverage_note": "1-2 предложения, почему набор вопросов покрывает все ключевые моменты"',
+        '}',
+        '',
+        'Ограничения:',
+        '- Не добавляй ничего вне указанного JSON.',
+        '- Источник только предоставленный текст: никаких внешних знаний.',
+        '- Количество вопросов не фиксировано: ориентируйся на плотность фактов.',
+        '',
+        'Текст для анализа:',
+        '"""',
+        sourceText,
+        '"""'
+      ].join('\n')
+    },
+    parseJsonSafe(text) {
+      try {
+        const cleaned = String(text).trim()
+          .replace(/^```(json)?/i, '')
+          .replace(/```$/i, '')
+        return JSON.parse(cleaned)
+      } catch (_) { return null }
+    },
+    mapQuizResponse(json) {
+      if (!json || !Array.isArray(json.questions)) return []
+      const toMcq = (q) => {
+        const makeClozeOptions = (answer) => {
+          const base = String(answer || '').trim()
+          const alts = new Set()
+          if (base.length > 0) {
+            alts.add(base.toUpperCase())
+            alts.add(base.toLowerCase())
+            if (base.length > 3) alts.add(base.slice(0, Math.max(2, Math.floor(base.length / 2))) + '…')
+          }
+          while (alts.size < 3) alts.add(base + Math.random().toString(36).slice(2, 4))
+          const options = [base, ...Array.from(alts).slice(0, 3)]
+          // shuffle options
+          for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]] }
+          return options
+        }
+        const type = (q.type || '').toLowerCase()
+        if (type === 'mcq') {
+          return {
+            question: q.question || '',
+            options: Array.isArray(q.options) ? q.options.slice() : [],
+            answer: q.answer, // строка правильного ответа OK — normalizeQuiz обработает
+            rationale: q.explanation || ''
+          }
+        }
+        if (type === 'true_false') {
+          const ans = (typeof q.answer === 'boolean') ? q.answer : String(q.answer).toLowerCase() === 'true'
+          return {
+            question: q.question || '',
+            options: ['True', 'False'],
+            answer: ans ? 'True' : 'False',
+            rationale: q.explanation || ''
+          }
+        }
+        if (type === 'cloze') {
+          const options = makeClozeOptions(q.answer)
+          return {
+            question: (q.question || '').replace(/_{2,}/g, '_____'),
+            options,
+            answer: q.answer,
+            rationale: q.explanation || ''
+          }
+        }
+        // fallback: пропустим неизвестные
+        return null
+      }
+      const mapped = json.questions.map(toMcq).filter(Boolean)
+      return mapped
+    },
+    async generateQuizFromTranscript() {
+      if (!this.note || !this.note.transcript) return
+      const apiKey = import.meta.env.OPENAI_API_KEY
+      if (!apiKey) {
+        alert('OPENAI_API_KEY не найден. Задайте OPENAI_API_KEY в .env и перезапустите дев-сервер.')
+        return
+      }
+      try {
+        this.genLoading = true
+        const prompt = this.buildQuizPrompt(this.note.transcript, 'ru')
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + apiKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: 'Ты помогаешь создавать учебные квизы. Отвечай строго в JSON по формату.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.2
+          })
+        })
+        if (!resp.ok) throw new Error('LLM error: ' + resp.status)
+        const data = await resp.json()
+        const content = data?.choices?.[0]?.message?.content || ''
+        const parsed = this.parseJsonSafe(content)
+        const mapped = this.mapQuizResponse(parsed)
+        if (!mapped.length) throw new Error('Не удалось распарсить вопросы')
+        this.quizList = this.normalizeQuiz(mapped)
+        this.resetQuiz()
+      } catch (e) {
+        console.error('Quiz generation failed', e)
+        alert('Не удалось сгенерировать квиз: ' + (e?.message || e))
+      } finally {
+        this.genLoading = false
+      }
     },
     loadSelectionForIndex() {
       const found = this.quizUi.answers.find(x => x.index === this.quizUi.index)

@@ -120,7 +120,7 @@ export default {
       this.error = ''
 
       try {
-        const response = await fetch('http://localhost:8080/api/login', {
+        const response = await fetch('/api/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -205,7 +205,7 @@ export default {
         }
 
         // Send to backend
-        const response = await fetch('http://localhost:8080/api/google-signup', {
+        const response = await fetch('/api/google-signup', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -270,7 +270,7 @@ export default {
       this.error = ''
 
       try {
-        const response = await fetch('http://localhost:8080/api/login', {
+        const response = await fetch('/api/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -325,7 +325,7 @@ export default {
           callback: async (response) => {
             if (response.error) { console.error('Ошибка авторизации Google: ' + response.error); this.loading = false; return }
             try {
-              const serverResponse = await fetch('http://localhost:8080/api/google-signup', {
+              const serverResponse = await fetch('/api/google-signup', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token: response.access_token, idToken: response.credential })
@@ -411,7 +411,6 @@ export default {
 <style scoped>
 .signin-page {
   min-height: 100vh;
-  background: radial-gradient(1200px 400px at 10% -20%, rgba(168,85,247,.18), rgba(124,58,237,.10) 40%, rgba(16,16,32,1) 70%), #0b1020;
   display: flex;
   align-items: center;
   justify-content: center;
