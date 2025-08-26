@@ -29,6 +29,20 @@ import (
 // Lemon Squeezy webhook secret (set via env)
 var lemonWebhookSecret string
 
+// getEnvOrFile returns the value of the env var `key`.
+// If empty, and there is a companion var `key + "_FILE"`, it reads the value from that file path.
+func getEnvOrFile(key string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	if p := os.Getenv(key + "_FILE"); p != "" {
+		if b, err := os.ReadFile(p); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
+}
+
 // handleLemonWebhook verifies signature and updates user's premium status
 func handleLemonWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1001,9 +1015,75 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// SPA static files handler: serves files from dist and falls back to index.html
+func spaHandler(dist string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Try to serve the exact static file
+		reqPath := strings.TrimPrefix(r.URL.Path, "/")
+		// Protect against path traversal
+		reqPath = filepath.Clean(reqPath)
+		filePath := filepath.Join(dist, reqPath)
+		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, filePath)
+			return
+		}
+
+		// Fallback to index.html for SPA routes
+		http.ServeFile(w, r, filepath.Join(dist, "index.html"))
+	})
+}
+
+// Load environment variables from .env-like files without external deps.
+// Only sets a key if it's not already present in the process environment.
+func loadDotEnv(paths ...string) {
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+		b, err := io.ReadAll(f)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(b), "\n")
+		for _, line := range lines {
+			s := strings.TrimSpace(line)
+			if s == "" || strings.HasPrefix(s, "#") { // skip comments/empty
+				continue
+			}
+			// allow export PREFIX
+			if strings.HasPrefix(s, "export ") {
+				s = strings.TrimSpace(strings.TrimPrefix(s, "export "))
+			}
+			// split by first '='
+			eq := strings.Index(s, "=")
+			if eq <= 0 {
+				continue
+			}
+			key := strings.TrimSpace(s[:eq])
+			val := strings.TrimSpace(s[eq+1:])
+			// strip surrounding quotes
+			if len(val) >= 2 {
+				if (val[0] == '\'' && val[len(val)-1] == '\'') || (val[0] == '"' && val[len(val)-1] == '"') {
+					val = val[1 : len(val)-1]
+				}
+			}
+			if os.Getenv(key) == "" {
+				_ = os.Setenv(key, val)
+			}
+		}
+		log.Printf("🔧 Loaded env from %s", p)
+	}
+}
+
 func main() {
+	// Load .env files so `go run .` works without manual exports
+	// Search project root and current dir when running from backend/
+	loadDotEnv(filepath.Join("..", ".env"), ".env")
+
 	// Читаем OpenAI API ключ из переменной окружения
-	openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+	openaiAPIKey = getEnvOrFile("OPENAI_API_KEY")
 	if openaiAPIKey == "" {
 		log.Fatal("❌ OPENAI_API_KEY не задан в переменных окружения!")
 	}
@@ -1075,11 +1155,50 @@ func main() {
 	r.HandleFunc("/api/materials/{id}", deleteMaterialByID).Methods("DELETE")
 	r.HandleFunc("/api/lemonsqueezy/webhook", handleLemonWebhook).Methods("POST")
 
+	// Serve Vite build (dist) with SPA fallback
+	distPath := os.Getenv("FRONTEND_DIST")
+	if distPath == "" {
+		// Support Cloud Run / buildpacks convention
+		distPath = os.Getenv("STATIC_DIR")
+	}
+	if distPath == "" {
+		candidates := []string{
+			filepath.Join("..", "dist"),
+			"dist",
+			filepath.Join("..", "src", "dist"),
+		}
+		for _, c := range candidates {
+			if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
+				distPath = c
+				break
+			}
+		}
+	}
+	if distPath != "" {
+		log.Printf("📦 Serving frontend from: %s", distPath)
+		// Use NotFoundHandler so API routes take precedence
+		r.NotFoundHandler = spaHandler(distPath)
+	} else {
+		log.Printf("⚠️ FRONTEND_DIST not set and no dist/index.html found; SPA serving disabled")
+	}
+
 	// Применяем CORS и COOP middleware
 	handler := corsMiddleware(coopMiddleware(r))
 
-	fmt.Println("🚀 SpeakApper Backend запущен на порту 8080")
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	// Read PORT from env for container platforms (default 8080)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	// Optional HOST (defaults to 0.0.0.0 via ":port")
+	host := os.Getenv("HOST")
+	addr := ":" + port
+	if host != "" {
+		addr = host + ":" + port
+	}
+
+	fmt.Printf("🚀 SpeakApper Backend listening on %s\n", addr)
+	log.Fatal(http.ListenAndServe(addr, handler))
 }
 
 // Генерация JWT токена
