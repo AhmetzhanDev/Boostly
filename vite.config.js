@@ -7,7 +7,14 @@ export default defineConfig(({ mode }) => {
     plugins: [vue()],
     server: {
       port: 3000,
-      open: true
+      open: true,
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8081',
+          changeOrigin: true,
+          secure: false
+        }
+      }
     },
     define: {
       'import.meta.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY || '')

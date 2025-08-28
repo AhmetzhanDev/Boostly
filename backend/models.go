@@ -131,6 +131,26 @@ type QuizQuestion struct {
 	Citation   string      `json:"citation,omitempty"`   // Цитата/ссылка на фрагмент транскрипта
 }
 
+// Промежуточная структура для парсинга quiz от AI
+type AIQuizStructure struct {
+	MultipleChoice []struct {
+		Question string   `json:"question"`
+		Options  []string `json:"options"`
+		Answer   string   `json:"answer"`
+	} `json:"multipleChoice"`
+	TrueFalse []struct {
+		Statement string `json:"statement"`
+		Answer    bool   `json:"answer"`
+	} `json:"trueFalse"`
+}
+
+// Структура для парсинга ответа от AI с гибким quiz полем
+type GeneratePayloadRaw struct {
+	Flashcards   []Flashcard     `json:"flashcards"`
+	Quiz         json.RawMessage `json:"quiz"` // Сырой JSON для гибкого парсинга
+	LanguageCode string          `json:"languageCode,omitempty"`
+}
+
 type GeneratePayload struct {
 	Flashcards   []Flashcard    `json:"flashcards"`
 	Quiz         []QuizQuestion `json:"quiz"`

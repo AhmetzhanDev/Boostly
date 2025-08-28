@@ -377,7 +377,7 @@
 
           <ul class="steps">
             <li class="step-item" :class="{done: proc.step1.done}">
-              <div class="left" :class="{ glow: !proc.step1.done }"><span class="num">1</span></div>
+              <div class="left"><span class="num">1</span></div>
               <div class="mid">
                 <div class="stitle">Note is creating</div>
               </div>
@@ -387,7 +387,7 @@
               </div>
             </li>
             <li class="step-item" :class="{done: proc.step2.done}">
-              <div class="left" :class="{ glow: !proc.step2.done && proc.step1.done }"><span class="num">2</span></div>
+              <div class="left"><span class="num">2</span></div>
               <div class="mid">
                 <div class="stitle">Record is uploading</div>
                 <div class="progress-line" v-if="!proc.step2.done">
@@ -401,7 +401,7 @@
               </div>
             </li>
             <li class="step-item" :class="{done: proc.step3.done}">
-              <div class="left" :class="{ glow: !proc.step3.done && proc.step2.done }"><span class="num">3</span></div>
+              <div class="left"><span class="num">3</span></div>
               <div class="mid">
                 <div class="stitle">Record is transcribing</div>
                 <div class="sdesc">Progress {{ fmtTime(proc.step3.elapsed) }}</div>
@@ -412,7 +412,7 @@
               </div>
             </li>
             <li class="step-item" :class="{done: proc.step4.done}">
-              <div class="left" :class="{ glow: !proc.step4.done && proc.step3.done }"><span class="num">4</span></div>
+              <div class="left"><span class="num">4</span></div>
               <div class="mid">
                 <div class="stitle">AI is generating note</div>
                 <div class="sdesc">{{ proc.step4.done ? 'Completed' : 'Progress ' + fmtTime(proc.step4.elapsed) }}</div>
@@ -423,7 +423,7 @@
               </div>
             </li>
             <li class="step-item" :class="{done: proc.ready}">
-              <div class="left" :class="{ glow: proc.step4.done && !proc.ready }"><span class="num">5</span></div>
+              <div class="left"><span class="num">5</span></div>
               <div class="mid">
                 <div class="stitle">Note is ready</div>
               </div>
@@ -1485,8 +1485,10 @@ export default {
 .modal-body { padding:20px; display:flex; flex-direction:column; gap:16px; max-height: min(70vh, 640px); overflow:auto; }
 .modal-body .note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rec-center { display:grid; place-items:center; padding:24px 0; }
-.mic-btn { width:84px; height:84px; border-radius:50%; display:grid; place-items:center; border:2px solid rgba(255,255,255,.2); background: rgba(255,255,255,.05); color: var(--text); cursor:pointer; box-shadow: 0 0 0 6px rgba(124,58,237,.12); }
-.mic-btn.recording { background:#ef4444; box-shadow: 0 0 0 6px rgba(239,68,68,.2); }
+.mic-btn { width:84px; height:84px; border-radius:50%; display:grid; place-items:center; border:2px solid rgba(255,255,255,.2); background: rgba(255,255,255,.05); color: var(--text); cursor:pointer; transition: all 0.2s ease; }
+.mic-btn:hover { background: rgba(255,255,255,.1); border-color: rgba(124,58,237,.4); }
+.mic-btn.recording { background:#ef4444; border-color: rgba(239,68,68,.6); }
+.mic-btn.recording:hover { background:#dc2626; }
 .rec-bar { display:flex; align-items:center; gap:12px; background: rgba(255,255,255,.06); border:1px solid var(--line); padding:10px 12px; border-radius:12px; width: max(260px, 60%); margin: 0 auto; }
 .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; background:#111; color:#fff; font-size:12px; border:1px solid var(--line); }
 .rec-actions { display:flex; align-items:center; justify-content:center; gap:12px; }
@@ -1503,7 +1505,11 @@ export default {
 .steps { display:flex; flex-direction:column; gap:10px; margin-top:8px; }
 .step-item { display:grid; grid-template-columns:28px 1fr auto; align-items:center; gap:12px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background: rgba(255,255,255,.035); }
 .step-item .left { display:grid; place-items:center; }
-.step-item .left.glow .num { box-shadow: 0 0 0 6px rgba(0,212,255,.12); border-color: rgba(0,212,255,.45); }
+.step-item .left.glow .num { 
+  border-color: rgba(0,212,255,.45); 
+  background: rgba(0,212,255,.1); 
+  box-shadow: none !important;
+}
 
 /* Premium modal */
 .premium-intro { text-align:center; color:var(--muted); margin-top:2px; }
@@ -1517,7 +1523,7 @@ export default {
 .plan-price .per { color: var(--muted); font-size:12px; margin-left:6px; }
 .plan .note { color: var(--muted); font-size:12px; margin-top:-4px; }
 .fine { color: var(--muted); font-size:12px; margin-top:12px; text-align:center; }
-.num { width:22px; height:22px; border-radius:999px; display:grid; place-items:center; background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); font-size:12px; font-weight:800; }
+.num { width:22px; height:22px; border-radius:999px; display:grid; place-items:center; background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); font-size:12px; font-weight:800; box-shadow: none !important; }
 .stitle { font-weight:700; }
 .sdesc { color: var(--muted); font-size:12px; margin-top:4px; }
 .right { display:flex; align-items:center; gap:8px; }

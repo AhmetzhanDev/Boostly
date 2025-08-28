@@ -100,7 +100,7 @@
           <div class="hero-text">
             <h2 class="hero-title">Trusted by 4M+ users</h2>
             <h1 class="hero-heading">
-              Meet SpeakApper AI<br>
+              Meet SpeakApper <br>
               <span class="highlight">AI </span>
             </h1>
             <p class="hero-subtitle">Your smartest friend, right in your notes.</p>

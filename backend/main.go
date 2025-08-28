@@ -338,9 +338,9 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	words := len(strings.Fields(reqBody.Transcript))
 	targetQuiz := 0
 	if words > 0 {
-		targetQuiz = words / 120 // ~1 вопрос на 120 слов
-		if targetQuiz < 6 {
-			targetQuiz = 6
+		targetQuiz = words / 90 // ~1 вопрос на 120 слов
+		if targetQuiz < 8 {
+			targetQuiz = 8
 		}
 		if targetQuiz > 30 {
 			targetQuiz = 30
@@ -348,18 +348,66 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[handleGenerateAndSave] transcript_len=%d words=%d targetQuiz~=%d", len(reqBody.Transcript), words, targetQuiz)
 
-	// Усиленный промпт с логикой квизов и балансом типов
-	systemPrompt := strings.Join([]string{
-		"You convert transcripts into study materials.",
-		"RULES:",
-		"- Output JSON only with fields: {\"flashcards\": Flashcard[], \"quiz\": QuizQuestion[]}",
-		"- Flashcard: {term, definition, example?}",
-		"- QuizQuestion: {id?, type, question, options?, answer?, correct?, pairs?, rationale?, difficulty?, citation?}",
-		"- Prefer concise, clear Russian if transcript is Russian; otherwise use transcript language.",
-		"- Provide at least 3 flashcards and at least 3 quiz questions even for short transcripts (use generic but relevant basics if needed).",
-		"- Balance quiz types across TF/MCQ/SHORT where possible; include rationale when feasible.",
-		"- Keep answers short; options 2-5 items.",
-	}, "\n")
+	// Улучшенный промпт для флешкарточек с подсчетом слов
+	systemPrompt := `Ты — профессиональный генератор flashcards и quiz для эффективного обучения.
+Я дам тебе текст. Твоя задача — сначала посчитать количество слов, а затем создать оптимальное количество карточек и вопросов по правилам ниже.
+
+1. Подсчёт слов
+Сначала посчитай количество слов в предоставленном тексте.
+
+2. Определение количества карточек
+Количество карточек выбирается автоматически в зависимости от объёма текста:
+≤ 500 слов: 8–12 карточек (Базовые факты)
+500–1500 слов: 15–25 карточек (Ключевые идеи)  
+1500–3000 слов: 25–40 карточек (Термины + концепции)
+> 3000 слов: 40–60 карточек макс. (Глубокое понимание)
+
+3. Разделение по уровням сложности (только если слов больше 1500)
+Базовый уровень → термины, определения, даты.
+Средний уровень → ключевые идеи, факты, основные события.
+Продвинутый уровень → глубокие взаимосвязи, анализ, выводы.
+
+4. Важные правила
+Создавай только те карточки, для которых есть информация в тексте.
+Не выдумывай факты и не придумывай термины.
+Старайся формулировать вопросы коротко, а ответы — ёмко.
+Если текста мало — карточек будет меньше.
+Если текста много — карточек будет больше, но не делай их перегруженными.
+ИСПОЛЬЗУЙ ЯЗЫК ИСХОДНОГО ТЕКСТА: на каком языке дан текст, на том языке и создавай карточки.
+
+5. Quiz правила
+Ты — генератор комплексных квизов.  
+На вход даётся учебный текст.  
+Создай набор вопросов, состоящий из двух частей:
+1. Вопросы с вариантами ответов (4 опции, один правильный).
+2. Вопросы формата True/False.
+
+Правила:
+1. Количество вопросов зависит от объёма текста:
+   • до 500 слов → минимум 8 вопросов  
+   • 500–1000 слов → 10–12 вопросов  
+   • 1000–1500 слов → 15–18 вопросов  
+   • больше 1500 слов → 22–30 вопросов.
+2. Разделяй блоки: сначала идут вопросы с вариантами ответов, потом True/False.
+3. ИСПОЛЬЗУЙ ЯЗЫК ИСХОДНОГО ТЕКСТА: на каком языке дан текст, на том языке и создавай вопросы.
+4. Формат вывода:
+{
+  "multipleChoice": [
+    {
+      "question": "Вопрос...",
+      "options": ["A", "B", "C", "D"],
+      "answer": "Правильный вариант"
+    }
+  ],
+  "trueFalse": [
+    {
+      "statement": "Утверждение...",
+      "answer": true
+    }
+  ]
+}
+
+ФОРМАТ ОТВЕТА: Верни только JSON с полями flashcards и quiz. Каждая flashcard должна содержать {term, definition, example?}. Каждый quiz вопрос должен содержать {id?, type, question, options?, answer?, correct?, rationale?}.`
 
 	userPrompt := fmt.Sprintf(
 		"Language hint: %s\nAim for ~%d total quiz questions given transcript length (adjust down if insufficient material).\nTranscript:\n%s\n\nReturn JSON only.",
@@ -420,24 +468,27 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse raw response first
+	var payloadRaw GeneratePayloadRaw
 	var payload GeneratePayload
-	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payload); err != nil {
+	parsed := false
+	
+	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payloadRaw); err != nil {
 		clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
 		clean = strings.TrimPrefix(clean, "```json")
 		clean = strings.TrimPrefix(clean, "```")
 		clean = strings.TrimSuffix(clean, "```")
 		clean = strings.TrimSpace(clean)
-		if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
+		if err2 := json.Unmarshal([]byte(clean), &payloadRaw); err2 != nil {
 			// Попытка 3: извлечь JSON по первым и последним фигурным скобкам
 			raw := openaiResp.Choices[0].Message.Content
 			i := strings.Index(raw, "{")
 			j := strings.LastIndex(raw, "}")
-			parsed := false
 			if i >= 0 && j > i {
 				candidate := strings.TrimSpace(raw[i : j+1])
 				// Нормализация известных нестандартных ключей от модели
 				candidate = strings.ReplaceAll(candidate, "\"example?\"", "\"example\"")
-				if err3 := json.Unmarshal([]byte(candidate), &payload); err3 == nil {
+				if err3 := json.Unmarshal([]byte(candidate), &payloadRaw); err3 == nil {
 					log.Printf("[handleGenerateAndSave] Parsed AI JSON via brace-extract normalization")
 					parsed = true
 				} else {
@@ -447,6 +498,68 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 			if !parsed {
 				// Не валидный JSON: фиксируем и переходим к бэкенд-фоллбеку ниже
 				log.Printf("[handleGenerateAndSave] Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
+			}
+		} else {
+			parsed = true
+		}
+	} else {
+		parsed = true
+	}
+	
+	if parsed {
+		// Convert to final payload
+		payload = GeneratePayload{
+			Flashcards:   payloadRaw.Flashcards,
+			LanguageCode: payloadRaw.LanguageCode,
+		}
+		
+		// Parse quiz structure
+		if len(payloadRaw.Quiz) > 0 {
+			// Try parsing as array first (old format)
+			var quizArray []QuizQuestion
+			if err := json.Unmarshal(payloadRaw.Quiz, &quizArray); err == nil {
+				payload.Quiz = quizArray
+			} else {
+				// Try parsing as structured format (new format)
+				var aiQuiz AIQuizStructure
+				if err := json.Unmarshal(payloadRaw.Quiz, &aiQuiz); err == nil {
+					// Convert to QuizQuestion array
+					var convertedQuiz []QuizQuestion
+					
+					// Add MCQ questions
+					for i, mcq := range aiQuiz.MultipleChoice {
+						convertedQuiz = append(convertedQuiz, QuizQuestion{
+							ID:       FlexString(fmt.Sprintf("%d", i+1)),
+							Type:     "MCQ",
+							Question: mcq.Question,
+							Options:  mcq.Options,
+							Answer:   mcq.Answer,
+							Correct:  true,
+						})
+					}
+					
+					// Add TF questions
+					for i, tf := range aiQuiz.TrueFalse {
+						answer := "False"
+						if tf.Answer {
+							answer = "True"
+						}
+						convertedQuiz = append(convertedQuiz, QuizQuestion{
+							ID:       FlexString(fmt.Sprintf("%d", len(aiQuiz.MultipleChoice)+i+1)),
+							Type:     "TF",
+							Question: tf.Statement,
+							Options:  []string{"True", "False"},
+							Answer:   answer,
+							Correct:  tf.Answer,
+						})
+					}
+					
+					payload.Quiz = convertedQuiz
+					log.Printf("[handleGenerateAndSave] Converted AI quiz: MCQ=%d TF=%d total=%d", len(aiQuiz.MultipleChoice), len(aiQuiz.TrueFalse), len(convertedQuiz))
+				} else {
+					log.Printf("[handleGenerateAndSave] Failed to parse quiz structure: %v", err)
+					payload.Quiz = []QuizQuestion{}
+				}
 			}
 		}
 	}
@@ -936,12 +1049,72 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build chat completion request
+	systemPrompt := `Ты — профессиональный генератор flashcards и quiz для эффективного обучения.
+Я дам тебе текст. Твоя задача — сначала посчитать количество слов, а затем создать оптимальное количество карточек и вопросов по правилам ниже.
+
+1. Подсчёт слов
+Сначала посчитай количество слов в предоставленном тексте.
+
+2. Определение количества карточек
+Количество карточек выбирается автоматически в зависимости от объёма текста:
+≤ 500 слов: 8–12 карточек (Базовые факты)
+500–1500 слов: 15–25 карточек (Ключевые идеи)  
+1500–3000 слов: 25–40 карточек (Термины + концепции)
+> 3000 слов: 40–60 карточек макс. (Глубокое понимание)
+
+3. Разделение по уровням сложности (только если слов больше 1500)
+Базовый уровень → термины, определения, даты.
+Средний уровень → ключевые идеи, факты, основные события.
+Продвинутый уровень → глубокие взаимосвязи, анализ, выводы.
+
+4. Важные правила
+Создавай только те карточки, для которых есть информация в тексте.
+Не выдумывай факты и не придумывай термины.
+Старайся формулировать вопросы коротко, а ответы — ёмко.
+Если текста мало — карточек будет меньше.
+Если текста много — карточек будет больше, но не делай их перегруженными.
+ИСПОЛЬЗУЙ ЯЗЫК ИСХОДНОГО ТЕКСТА: на каком языке дан текст, на том языке и создавай карточки.
+
+5. Quiz правила
+Ты — генератор комплексных квизов.  
+На вход даётся учебный текст.  
+Создай набор вопросов, состоящий из двух частей:
+1. Вопросы с вариантами ответов (4 опции, один правильный).
+2. Вопросы формата True/False.
+
+Правила:
+1. Количество вопросов зависит от объёма текста:
+   • до 500 слов → минимум 8 вопросов  
+   • 500–1000 слов → 10–12 вопросов  
+   • 1000–1500 слов → 15–18 вопросов  
+   • больше 1500 слов → 22–30 вопросов.
+2. Разделяй блоки: сначала идут вопросы с вариантами ответов, потом True/False.
+3. ИСПОЛЬЗУЙ ЯЗЫК ИСХОДНОГО ТЕКСТА: на каком языке дан текст, на том языке и создавай вопросы.
+4. Формат вывода:
+{
+  "multipleChoice": [
+    {
+      "question": "Вопрос...",
+      "options": ["A", "B", "C", "D"],
+      "answer": "Правильный вариант"
+    }
+  ],
+  "trueFalse": [
+    {
+      "statement": "Утверждение...",
+      "answer": true
+    }
+  ]
+}
+
+ФОРМАТ ОТВЕТА: Верни только JSON с полями flashcards и quiz. Каждая flashcard должна содержать {term, definition, example?}. Каждый quiz вопрос должен содержать {id?, type, question, options?, answer?, correct?, rationale?}.`
+
 	chatReq := map[string]interface{}{
 		"model":           "gpt-4o-mini",
 		"temperature":     0.3,
 		"response_format": map[string]string{"type": "json_object"},
 		"messages": []map[string]string{
-			{"role": "system", "content": "You convert transcripts into study materials. IMPORTANT RULES: 1) USE ONLY words and facts from the transcript; DO NOT invent. 2) Flashcards: term must be an exact word/phrase from transcript; definition should be a short sentence fragment from transcript (or closest sentence). 3) Quiz: each question must be based on transcript; the correct answer and ALL options must be text spans that appear in the transcript. 4) If there is not enough material, return fewer items. Respond strictly as compact JSON with keys: flashcards (array of {term, definition, example?}) and quiz (array of {id?, topicId?, question, options[4], answer, hint?}). No extra commentary, no markdown fences."},
+			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": fmt.Sprintf("Language hint: %s\nTranscript:\n%s\n\nReturn JSON only.", reqBody.Language, reqBody.Transcript)},
 		},
 	}
@@ -992,8 +1165,9 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload GeneratePayload
-	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payload); err != nil {
+	// Parse raw response first
+	var payloadRaw GeneratePayloadRaw
+	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payloadRaw); err != nil {
 		// If model returned fenced code block, try strip
 		clean := openaiResp.Choices[0].Message.Content
 		clean = strings.TrimSpace(clean)
@@ -1001,10 +1175,66 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		clean = strings.TrimPrefix(clean, "```json")
 		clean = strings.TrimPrefix(clean, "```")
 		clean = strings.TrimSuffix(clean, "```")
-		if err2 := json.Unmarshal([]byte(clean), &payload); err2 != nil {
+		if err2 := json.Unmarshal([]byte(clean), &payloadRaw); err2 != nil {
 			log.Printf("Failed to unmarshal AI JSON: %v; content: %s", err, openaiResp.Choices[0].Message.Content)
 			http.Error(w, "Invalid JSON from model", http.StatusInternalServerError)
 			return
+		}
+	}
+
+	// Convert to final payload
+	payload := GeneratePayload{
+		Flashcards:   payloadRaw.Flashcards,
+		LanguageCode: payloadRaw.LanguageCode,
+	}
+
+	// Parse quiz structure
+	if len(payloadRaw.Quiz) > 0 {
+		// Try parsing as array first (old format)
+		var quizArray []QuizQuestion
+		if err := json.Unmarshal(payloadRaw.Quiz, &quizArray); err == nil {
+			payload.Quiz = quizArray
+		} else {
+			// Try parsing as structured format (new format)
+			var aiQuiz AIQuizStructure
+			if err := json.Unmarshal(payloadRaw.Quiz, &aiQuiz); err == nil {
+				// Convert to QuizQuestion array
+				var convertedQuiz []QuizQuestion
+				
+				// Add MCQ questions
+				for i, mcq := range aiQuiz.MultipleChoice {
+					convertedQuiz = append(convertedQuiz, QuizQuestion{
+						ID:       FlexString(fmt.Sprintf("%d", i+1)),
+						Type:     "MCQ",
+						Question: mcq.Question,
+						Options:  mcq.Options,
+						Answer:   mcq.Answer,
+						Correct:  true,
+					})
+				}
+				
+				// Add TF questions
+				for i, tf := range aiQuiz.TrueFalse {
+					answer := "False"
+					if tf.Answer {
+						answer = "True"
+					}
+					convertedQuiz = append(convertedQuiz, QuizQuestion{
+						ID:       FlexString(fmt.Sprintf("%d", len(aiQuiz.MultipleChoice)+i+1)),
+						Type:     "TF",
+						Question: tf.Statement,
+						Options:  []string{"True", "False"},
+						Answer:   answer,
+						Correct:  tf.Answer,
+					})
+				}
+				
+				payload.Quiz = convertedQuiz
+				log.Printf("[handleGenerate] Converted AI quiz: MCQ=%d TF=%d total=%d", len(aiQuiz.MultipleChoice), len(aiQuiz.TrueFalse), len(convertedQuiz))
+			} else {
+				log.Printf("[handleGenerate] Failed to parse quiz structure: %v", err)
+				payload.Quiz = []QuizQuestion{}
+			}
 		}
 	}
 

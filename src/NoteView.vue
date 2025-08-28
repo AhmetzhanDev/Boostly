@@ -90,7 +90,19 @@
               <div class="q-meta">Question {{ quizUi.index+1 }} of {{ quizList.length }}</div>
               <div class="q-text">{{ currentQuestion.question || currentQuestion.q || ('Question #' + (quizUi.index+1)) }}</div>
 
-              <ul class="opts" v-if="currentQuestion.options && currentQuestion.options.length">
+              <!-- Text input for SHORT answer questions -->
+              <div v-if="isShortQuestion" class="short-answer">
+                <input 
+                  v-model="quizUi.shortAnswer" 
+                  type="text" 
+                  class="short-input" 
+                  placeholder="Введите ваш ответ..."
+                  @input="onShortAnswerInput"
+                />
+              </div>
+
+              <!-- Multiple choice options for other question types -->
+              <ul class="opts" v-else-if="currentQuestion.options && currentQuestion.options.length">
                 <li v-for="(opt, j) in currentQuestion.options"
                     :key="j"
                     class="opt"
@@ -102,6 +114,17 @@
                   <span class="label">{{ opt }}</span>
                 </li>
               </ul>
+
+              <!-- Fallback for questions without options and not SHORT type -->
+              <div v-else class="short-answer">
+                <input 
+                  v-model="quizUi.shortAnswer" 
+                  type="text" 
+                  class="short-input" 
+                  placeholder="Введите ваш ответ..."
+                  @input="onShortAnswerInput"
+                />
+              </div>
 
               <div class="q-actions">
                 <button class="ghost" :disabled="quizUi.index===0" @click="prev">Prev</button>
@@ -213,6 +236,7 @@ export default {
         // для MCQ: selected = number | null; для MSQ используем selectedMulti: Set
         selected: null,
         selectedMulti: new Set(),
+        shortAnswer: '', // для вопросов типа SHORT
         answers: [], // [{index, value}] — value: number | number[] depending on type
         completed: false,
       },
@@ -245,11 +269,20 @@ export default {
     currentQuestion() {
       return (this.quizList[this.quizUi.index] || {})
     },
+    isShortQuestion() {
+      const q = this.currentQuestion
+      const type = (q.type || '').toUpperCase()
+      console.log('isShortQuestion check:', { question: q, type, isShort: type === 'SHORT' })
+      return type === 'SHORT'
+    },
     isMSQ() {
       const q = this.currentQuestion
       return Array.isArray(q?.correct) && q.correct.length > 1
     },
     canSubmitCurrent() {
+      if (this.isShortQuestion) {
+        return this.quizUi.shortAnswer.trim().length > 0
+      }
       return this.isMSQ ? (this.quizUi.selectedMulti.size > 0) : (this.quizUi.selected !== null)
     },
     progressPercent() {
@@ -263,31 +296,60 @@ export default {
       this.quizUi.answers.forEach((entry) => {
         const q = this.quizList[entry.index]
         if (!q) return
-        const truth = Array.isArray(q.correct) && q.correct.length
-          ? q.correct
-          : (typeof q.answer === 'number' ? [q.answer] : [q.options ? q.options.indexOf(q.answer) : -1])
-        const compareAs = (val) => Array.isArray(val) ? [...val].sort().join(',') : String(val)
-        const normalize = (arr) => arr.filter(x => x !== -1 && x !== undefined && x !== null)
-        let your = entry.value
+        
+        const qType = (q.type || '').toUpperCase()
         let isCorrect = false
-        if (Array.isArray(your)) {
-          const yn = normalize(your)
-          const tn = normalize(truth.map((t) => (typeof t === 'number' ? t : q.options ? q.options.indexOf(t) : -1)))
-          isCorrect = compareAs(yn) === compareAs(tn)
+        let yourText = ''
+        let corrText = ''
+        
+        if (qType === 'SHORT') {
+          // Для вопросов типа SHORT сравниваем текстовые ответы
+          const userAnswer = String(entry.value || '').trim().toLowerCase()
+          const correctAnswer = String(q.answer || '').trim().toLowerCase()
+          
+          // Более гибкое сравнение - убираем лишние пробелы и знаки препинания
+          const normalize = (text) => text.replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim()
+          const normalizedUser = normalize(userAnswer)
+          const normalizedCorrect = normalize(correctAnswer)
+          
+          isCorrect = normalizedUser === normalizedCorrect
+          yourText = String(entry.value || '')
+          corrText = String(q.answer || '')
         } else {
-          const tIdx = (Array.isArray(truth) ? truth[0] : truth)
-          const tIndex = (typeof tIdx === 'number') ? tIdx : (q.options ? q.options.indexOf(tIdx) : -1)
-          isCorrect = Number(your) === Number(tIndex)
-        }
-        if (isCorrect) correct++
-        else {
-          const yourText = Array.isArray(entry.value)
+          // Для вопросов с вариантами ответов (MCQ, MSQ, TF)
+          const truth = Array.isArray(q.correct) && q.correct.length
+            ? q.correct
+            : (typeof q.answer === 'number' ? [q.answer] : [q.options ? q.options.indexOf(q.answer) : -1])
+          const compareAs = (val) => Array.isArray(val) ? [...val].sort().join(',') : String(val)
+          const normalize = (arr) => arr.filter(x => x !== -1 && x !== undefined && x !== null)
+          let your = entry.value
+          
+          if (Array.isArray(your)) {
+            const yn = normalize(your)
+            const tn = normalize(truth.map((t) => (typeof t === 'number' ? t : q.options ? q.options.indexOf(t) : -1)))
+            isCorrect = compareAs(yn) === compareAs(tn)
+          } else {
+            const tIdx = (Array.isArray(truth) ? truth[0] : truth)
+            const tIndex = (typeof tIdx === 'number') ? tIdx : (q.options ? q.options.indexOf(tIdx) : -1)
+            isCorrect = Number(your) === Number(tIndex)
+          }
+          
+          yourText = Array.isArray(entry.value)
             ? entry.value.map(i => q.options?.[i]).filter(Boolean).join(' | ')
             : q.options?.[entry.value]
-          const corrText = (Array.isArray(truth) ? truth : [truth])
+          corrText = (Array.isArray(truth) ? truth : [truth])
             .map(v => (typeof v === 'number') ? q.options?.[v] : v)
             .filter(Boolean).join(' | ')
-          wrongItems.push({ index: entry.index, q, your: yourText || '—', correct: corrText || '—' })
+        }
+        
+        if (isCorrect) correct++
+        else {
+          wrongItems.push({ 
+            index: entry.index, 
+            q, 
+            your: yourText || '—', 
+            correct: corrText || '—' 
+          })
         }
       })
       return { correct, wrongItems }
@@ -379,9 +441,14 @@ export default {
     },
     normalizeQuiz(list) {
       try {
+        console.log('normalizeQuiz input:', list)
         const out = []
-        ;(list || []).forEach((q) => {
-          if (!q || typeof q !== 'object') return
+        ;(list || []).forEach((q, index) => {
+          console.log(`Processing question ${index}:`, q)
+          if (!q || typeof q !== 'object') {
+            console.log(`Skipping question ${index}: not an object`)
+            return
+          }
           const type = (q.type || q.Type || '').toUpperCase()
           let options = Array.isArray(q.options) ? q.options.slice() : []
           let answer = q.answer
@@ -392,20 +459,30 @@ export default {
             options = ['True', 'False']
           }
 
-          // Оставляем только поддерживаемые типы с вариантами ответов
+          // Для вопросов типа SHORT не нужны варианты ответов
+          const isShortAnswer = type === 'SHORT'
           const hasVariants = Array.isArray(options) && options.length > 0
           const hasAnswer = (answer !== undefined && answer !== null && answer !== '') || (Array.isArray(correct) && correct.length > 0)
-          if (!hasVariants || !hasAnswer) return
+          
+          console.log(`Question ${index} - type: ${type}, hasVariants: ${hasVariants}, hasAnswer: ${hasAnswer}, isShortAnswer: ${isShortAnswer}`)
+          
+          // Пропускаем только если нет ответа, или если это не SHORT и нет вариантов
+          if (!hasAnswer || (!isShortAnswer && !hasVariants)) {
+            console.log(`Skipping question ${index}: missing answer or variants`)
+            return
+          }
 
           // Возвращаем унифицированный объект
           out.push({
             question: q.question || q.q || '',
+            type: type, // Сохраняем тип вопроса
             options,
             answer,
             correct,
             rationale: q.rationale || ''
           })
         })
+        console.log('normalizeQuiz output:', out)
         return out
       } catch(_){ return Array.isArray(list) ? list : [] }
     },
@@ -443,6 +520,7 @@ export default {
       this.quizUi.index = 0
       this.quizUi.selected = null
       this.quizUi.selectedMulti = new Set()
+      this.quizUi.shortAnswer = ''
       this.quizUi.answers = []
       this.quizUi.completed = false
       this.loadSelectionForIndex()
@@ -595,17 +673,28 @@ export default {
     },
     loadSelectionForIndex() {
       const found = this.quizUi.answers.find(x => x.index === this.quizUi.index)
+      const q = this.currentQuestion
+      const type = (q.type || '').toUpperCase()
+      
       if (!found) {
         this.quizUi.selected = null
         this.quizUi.selectedMulti = new Set()
+        this.quizUi.shortAnswer = ''
         return
       }
-      if (Array.isArray(found.value)) {
+      
+      if (type === 'SHORT') {
+        this.quizUi.shortAnswer = found.value || ''
+        this.quizUi.selected = null
+        this.quizUi.selectedMulti = new Set()
+      } else if (Array.isArray(found.value)) {
         this.quizUi.selected = null
         this.quizUi.selectedMulti = new Set(found.value)
+        this.quizUi.shortAnswer = ''
       } else {
         this.quizUi.selected = found.value
         this.quizUi.selectedMulti = new Set()
+        this.quizUi.shortAnswer = ''
       }
     },
     selectOption(j) {
@@ -617,6 +706,10 @@ export default {
       else set.add(j)
       this.quizUi.selectedMulti = set
     },
+    onShortAnswerInput() {
+      // Метод для обработки ввода в поле короткого ответа
+      // Можно добавить дополнительную логику, если нужно
+    },
     prev() {
       if (this.quizUi.index === 0) return
       this.quizUi.index--
@@ -624,11 +717,21 @@ export default {
     },
     commitAnswerThenNext() {
       const idx = this.quizUi.index
-      const isMSQ = Array.isArray(this.currentQuestion?.correct) && this.currentQuestion.correct.length > 1
-      const value = isMSQ ? Array.from(this.quizUi.selectedMulti) : this.quizUi.selected
+      const q = this.currentQuestion
+      const type = (q.type || '').toUpperCase()
+      
+      let value
+      if (type === 'SHORT') {
+        value = this.quizUi.shortAnswer.trim()
+      } else {
+        const isMSQ = Array.isArray(q?.correct) && q.correct.length > 1
+        value = isMSQ ? Array.from(this.quizUi.selectedMulti) : this.quizUi.selected
+      }
+      
       const existingIdx = this.quizUi.answers.findIndex(x => x.index === idx)
       if (existingIdx >= 0) this.quizUi.answers.splice(existingIdx, 1, { index: idx, value })
       else this.quizUi.answers.push({ index: idx, value })
+      
       if (this.quizUi.index < this.quizList.length - 1) {
         this.quizUi.index++
         this.loadSelectionForIndex()
@@ -729,28 +832,82 @@ audio { width: 100%; height: 40px; border-radius: 10px; background: rgba(255,255
 .study { display:flex; flex-direction: column; align-items:center; gap:18px; margin-top: 12px; }
 .study-controls { display:flex; align-items:center; gap:12px; opacity:.95; }
 .study-controls .progress { font-weight: 700; letter-spacing:.2px; opacity:.9; }
-.study-nav { display:flex; align-items:center; gap:16px; }
-.hint { opacity:.7; font-size: 12px; }
-.btn { padding:8px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); cursor:pointer; }
-.btn.ghost { background: transparent; }
-.btn:disabled { opacity:.5; cursor:not-allowed; }
+.study-nav { 
+  display: flex; 
+  align-items: center; 
+  gap: 24px; 
+  margin-top: 20px;
+}
+
+.hint { 
+  opacity: .6; 
+  font-size: 13px; 
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.btn { 
+  padding: 12px 20px; 
+  border-radius: 12px; 
+  border: none; 
+  background: #4a5568; 
+  color: #ffffff;
+  cursor: pointer; 
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  min-width: 80px;
+}
+
+.btn:hover:not(:disabled) { 
+  background: #5a6578; 
+  transform: translateY(-1px);
+}
+
+.btn:disabled { 
+  opacity: .4; 
+  cursor: not-allowed; 
+  background: #2d3748;
+}
 
 .study-card { width: min(680px, 96%); height: 300px; }
 @media (max-width: 600px) { .study-card { height: 240px; } }
 </style>
 
 <style scoped>
-/* Fancy flashcards */
-.cards.fancy { perspective: 1200px; gap: 16px; }
-.card { position: relative; height: 180px; border: none; background: transparent; padding: 0; }
-.card .card-inner {
+/* Ultra Fancy flashcards */
+.cards.fancy { 
+  perspective: 1500px; 
+  gap: 20px; 
+  padding: 8px;
+}
+
+.card.study-card { 
+  position: relative; 
+  height: 200px; 
+  border: none; 
+  background: transparent; 
+  padding: 0;
+  cursor: pointer;
+}
+
+/* .card.study-card:hover {
+  No hover effects
+} */
+
+.card.study-card .card-inner {
   position: relative;
   width: 100%;
   height: 100%;
   transform-style: preserve-3d;
-  transition: transform .6s cubic-bezier(.2,.8,.2,1), filter .3s ease, box-shadow .3s ease;
+  transition: transform .8s ease;
+  border-radius: 20px;
+  border: none;
 }
-.card.flipped .card-inner { transform: rotateY(180deg); }
+
+.card.study-card.flipped .card-inner { 
+  transform: rotateY(180deg); 
+}
 
 .card-face {
   position: absolute;
@@ -758,40 +915,116 @@ audio { width: 100%; height: 40px; border-radius: 10px; background: rgba(255,255
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 14px;
-  border-radius: 16px;
+  padding: 20px;
+  border-radius: 20px;
   backface-visibility: hidden;
-  background: radial-gradient(1200px 400px at 10% -20%, rgba(168,85,247,.28), rgba(124,58,237,.14) 40%, rgba(255,255,255,.05) 70%), rgba(255,255,255,.04);
-  border: 1px solid rgba(168,85,247,.28);
-  box-shadow:
-    0 10px 30px rgba(0,0,0,.35),
-    0 0 0 1px rgba(255,255,255,.05) inset,
-    0 0 80px rgba(168,85,247,.12) inset;
+  background: #323843;
+  border: none;
   overflow: hidden;
+  width: 100%;
+  height: 100%;
 }
+
+.card.study-card .card-inner::before {
+  display: none;
+}
+
 .card-face::after {
-  /* Shine */
-  content: "";
-  position: absolute; inset: -40%;
-  background: conic-gradient(from 180deg, rgba(168,85,247,.0), rgba(168,85,247,.25), rgba(124,58,237,.0));
-  filter: blur(22px);
-  transform: translate3d(0,0,0);
-  opacity: .35;
-  pointer-events: none;
+  display: none;
 }
-.card .front { transform: rotateY(0deg); }
-.card .back { transform: rotateY(180deg); }
 
-.fc-title { font-weight: 800; font-size: 18px; letter-spacing: .2px; }
-.fc-example { margin-top: 6px; color: #c6b8f8; opacity: .9; font-size: 13px; }
-.fc-back-title { font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: .6px; color:#c4b5fd; margin-bottom: 6px; }
-.fc-text { font-size: 15px; line-height: 1.4; }
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
-/* Float animation */
-.card { animation: float 6s ease-in-out infinite; }
+.card.study-card .front { transform: rotateY(0deg); }
+.card.study-card .back { transform: rotateY(180deg); }
+
+.fc-title { 
+  font-weight: 900; 
+  font-size: 20px; 
+  letter-spacing: .3px;
+  color: #ffffff;
+  margin-bottom: 8px;
+  text-shadow: 0 2px 4px rgba(0,0,0,.3);
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+
+.fc-definition { 
+  color: #e2e8f0; 
+  line-height: 1.6; 
+  font-size: 16px;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+
+.fc-example { 
+  margin-top: 8px; 
+  color: #c6b8f8; 
+  opacity: .85; 
+  font-size: 14px;
+  font-style: italic;
+  background: transparent;
+  padding: 6px 10px;
+  border: none;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+
+.fc-back-title { 
+  font-weight: 900; 
+  text-transform: uppercase; 
+  font-size: 13px; 
+  letter-spacing: 1px; 
+  color: #a78bfa;
+  margin-bottom: 12px;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+
+.fc-text { 
+  font-size: 16px; 
+  line-height: 1.5;
+  color: #f1f5f9;
+  text-shadow: 0 1px 2px rgba(0,0,0,.3);
+}
+
+/* Float animation - disabled */
+/* .card { animation: float 6s ease-in-out infinite; }
 .card:nth-child(2n) { animation-delay: .6s }
 .card:nth-child(3n) { animation-delay: 1.2s }
-@keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-4px) } }
+@keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-4px) } } */
+
+/* Short answer input */
+.short-answer {
+  margin: 16px 0;
+}
+
+.short-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+  transition: border-color .2s ease, background .2s ease;
+}
+
+.short-input:focus {
+  outline: none;
+  border-color: rgba(124,58,237,.5);
+  background: rgba(255,255,255,.08);
+}
+
+.short-input::placeholder {
+  color: rgba(255,255,255,.4);
+}
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
