@@ -6,6 +6,7 @@ import Dashboard from './Dashboard.vue'
 import NoteView from './NoteView.vue'
 import Settings from './Settings.vue'
 
+
 const routes = [
   {
     path: '/',
@@ -40,7 +41,8 @@ const routes = [
     name: 'Settings',
     component: Settings,
     meta: { requiresAuth: true }
-  }
+  },
+ 
   // ,
   // {
   //   path: '/signup',

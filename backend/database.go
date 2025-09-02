@@ -74,8 +74,8 @@ func DisconnectDB() error {
 // ValidateGoogleToken валидирует Google токен и получает информацию о пользователе
 func ValidateGoogleToken(accessToken string) (*GoogleUserInfo, error) {
 	url := fmt.Sprintf("https://www.googleapis.com/oauth2/v2/userinfo?access_token=%s", accessToken)
-
-	resp, err := http.Get(url)
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка при запросе к Google API: %v", err)
 	}
@@ -101,8 +101,8 @@ func ValidateGoogleToken(accessToken string) (*GoogleUserInfo, error) {
 // ValidateGoogleIDToken validates Google ID token and gets user information
 func ValidateGoogleIDToken(idToken string) (*GoogleUserInfo, error) {
 	url := fmt.Sprintf("https://oauth2.googleapis.com/tokeninfo?id_token=%s", idToken)
-
-	resp, err := http.Get(url)
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("error requesting Google tokeninfo API: %v", err)
 	}

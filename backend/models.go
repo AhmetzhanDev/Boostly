@@ -16,11 +16,6 @@ type User struct {
 	Email     string    `json:"email"`
 	Password  string    `json:"-"` // Не отправляем пароль в JSON
 	CreatedAt time.Time `json:"createdAt"`
-	// Поля подписки (Lemon Squeezy)
-	Premium          bool      `bson:"premium,omitempty" json:"premium"`
-	Plan             string    `bson:"plan,omitempty" json:"plan,omitempty"`
-	LsSubscriptionID string    `bson:"ls_subscription_id,omitempty" json:"ls_subscription_id,omitempty"`
-	CurrentPeriodEnd time.Time `bson:"current_period_end,omitempty" json:"current_period_end,omitempty"`
 }
 
 // SignupRequest представляет запрос на регистрацию
@@ -149,12 +144,14 @@ type GeneratePayloadRaw struct {
 	Flashcards   []Flashcard     `json:"flashcards"`
 	Quiz         json.RawMessage `json:"quiz"` // Сырой JSON для гибкого парсинга
 	LanguageCode string          `json:"languageCode,omitempty"`
+	Summary      string          `json:"summary,omitempty"`
 }
 
 type GeneratePayload struct {
 	Flashcards   []Flashcard    `json:"flashcards"`
 	Quiz         []QuizQuestion `json:"quiz"`
 	LanguageCode string         `json:"languageCode,omitempty"`
+	Summary      string         `json:"summary,omitempty"`
 }
 
 // Учебные материалы (материализованные карточки/квиз)
@@ -162,6 +159,7 @@ type Material struct {
 	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
 	UserID     primitive.ObjectID `bson:"user_id" json:"user_id"`
 	Transcript string             `bson:"transcript" json:"transcript"`
+	Summary    string             `bson:"summary,omitempty" json:"summary,omitempty"`
 	Flashcards []Flashcard        `bson:"flashcards" json:"flashcards"`
 	Quiz       []QuizQuestion     `bson:"quiz" json:"quiz"`
 	CreatedAt  time.Time          `bson:"created_at" json:"created_at"`

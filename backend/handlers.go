@@ -152,16 +152,30 @@ func googleSignupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate Google token (handle both access tokens and ID tokens)
-	googleUser, err := ValidateGoogleToken(req.Token)
-	if err != nil {
-		// Try validating as ID token if access token validation fails
-		googleUser, err = ValidateGoogleIDToken(req.Token)
+	// Validate Google token (prefer ID token if provided, otherwise access token)
+	if req.Token == "" && req.IDToken == "" {
+		JSONError(w, http.StatusBadRequest, "token or idToken is required")
+		return
+	}
+
+	var googleUser *GoogleUserInfo
+	var err error
+	// Try ID token first when present
+	if req.IDToken != "" {
+		googleUser, err = ValidateGoogleIDToken(req.IDToken)
 		if err != nil {
-			log.Printf("Error validating Google token: %v", err)
-			JSONError(w, http.StatusUnauthorized, "Invalid Google token")
-			return
+			log.Printf("ValidateGoogleIDToken failed: %v; will try access token if provided", err)
 		}
+	}
+	if googleUser == nil && req.Token != "" {
+		googleUser, err = ValidateGoogleToken(req.Token)
+		if err != nil {
+			log.Printf("ValidateGoogleToken failed: %v", err)
+		}
+	}
+	if googleUser == nil {
+		JSONError(w, http.StatusUnauthorized, "Invalid Google token")
+		return
 	}
 
 	// Check if user exists
@@ -420,6 +434,7 @@ func getMaterialByID(w http.ResponseWriter, r *http.Request) {
 		"transcript": mat.Transcript,
 		"flashcards": ff,
 		"quiz":       qq,
+		"summary":    mat.Summary,
 		"created_at": mat.CreatedAt,
 		"updated_at": mat.UpdatedAt,
 	}})

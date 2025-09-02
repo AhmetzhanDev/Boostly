@@ -4,8 +4,8 @@
       <div class="signin-card">
         <!-- Header -->
         <div class="signin-header">
-          <h1 class="signin-title">Войти в аккаунт</h1>
-          <p class="signin-subtitle">Добро пожаловать обратно в SpeakApper</p>
+          <h1 class="signin-title">Sign in</h1>
+          <p class="signin-subtitle">Welcome back to SpeakApper</p>
         </div>
 
         <!-- Login Form -->
@@ -17,21 +17,21 @@
               v-model="form.email"
               type="email"
               class="form-input"
-              placeholder="Введите ваш email"
+              placeholder="Enter your email"
               required
               :disabled="loading"
             />
           </div>
 
           <div class="form-group">
-            <label for="password" class="form-label">Пароль</label>
+            <label for="password" class="form-label">Password</label>
             <div class="password-input">
               <input
                 id="password"
                 v-model="form.password"
                 :type="showPassword ? 'text' : 'password'"
                 class="form-input"
-                placeholder="Введите ваш пароль"
+                placeholder="Enter your password"
                 required
                 :disabled="loading"
               />
@@ -67,14 +67,14 @@
                 <animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416" repeatCount="indefinite"/>
               </circle>
             </svg>
-            <span v-if="!loading">Войти</span>
-            <span v-else>Вход...</span>
+            <span v-if="!loading">Sign in</span>
+            <span v-else>Signing in...</span>
           </button>
         </form>
 
         <!-- Divider -->
         <div class="divider">
-          <span>или</span>
+          <span>or</span>
         </div>
 
         <!-- Google Sign In -->
@@ -85,13 +85,13 @@
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
             <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
           </svg>
-          Войти через Google
+          Sign in with Google
         </button>
 
         <!-- Footer Links -->
         <div class="signin-footer">
-          <p>Нет аккаунта? <router-link to="/signup" class="link">Зарегистрироваться</router-link></p>
-          <router-link to="/" class="link">← Вернуться на главную</router-link>
+          <p>Don't have an account? <router-link to="/signup" class="link">Sign up</router-link></p>
+          <router-link to="/" class="link">← Back to Home</router-link>
         </div>
       </div>
     </div>
@@ -141,16 +141,16 @@ export default {
           }
 
           // Show success message
-          this.showToast('Успешный вход в систему!')
+          this.showToast('Successfully signed in!')
 
           // Redirect to dashboard
           this.$router.push('/dashboard')
         } else {
-          this.error = data.message || 'Ошибка входа в систему'
+          this.error = data.message || 'Sign-in failed'
         }
       } catch (error) {
         console.error('Login error:', error)
-        this.error = 'Ошибка соединения с сервером'
+        this.error = 'Failed to connect to server'
       } finally {
         this.loading = false
       }
@@ -165,7 +165,7 @@ export default {
       try {
         // Initialize Google OAuth
         if (!window.google) {
-          throw new Error('Google OAuth не загружен')
+          throw new Error('Google OAuth not loaded')
         }
 
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -175,13 +175,13 @@ export default {
             if (response.access_token) {
               await this.handleGoogleCallback(response.access_token)
             } else {
-              this.error = 'Не удалось получить токен от Google'
+              this.error = 'Failed to obtain token from Google'
               this.loading = false
             }
           },
           error_callback: (error) => {
             console.error('Google OAuth error:', error)
-            this.error = 'Ошибка авторизации Google'
+            this.error = 'Google authorization error'
             this.loading = false
           }
         })
@@ -189,7 +189,7 @@ export default {
         tokenClient.requestAccessToken()
       } catch (error) {
         console.error('Google login error:', error)
-        this.error = 'Ошибка инициализации Google OAuth'
+        this.error = 'Google OAuth initialization error'
         this.loading = false
       }
     },
@@ -201,7 +201,7 @@ export default {
         const userInfo = await userInfoResponse.json()
 
         if (!userInfoResponse.ok) {
-          throw new Error('Не удалось получить информацию о пользователе')
+          throw new Error('Failed to fetch user information')
         }
 
         // Send to backend
@@ -228,14 +228,14 @@ export default {
             localStorage.setItem('user', JSON.stringify(data.user))
           }
 
-          this.showToast('Успешный вход через Google!')
+          this.showToast('Successfully signed in with Google!')
           this.$router.push('/dashboard')
         } else {
-          this.error = data.message || 'Ошибка входа через Google'
+          this.error = data.message || 'Google sign-in failed'
         }
       } catch (error) {
         console.error('Google callback error:', error)
-        this.error = 'Ошибка обработки Google авторизации'
+        this.error = 'Error processing Google authorization'
       } finally {
         this.loading = false
       }
@@ -291,16 +291,16 @@ export default {
           }
 
           // Show success message
-          this.showToast('Успешный вход в систему!')
+          this.showToast('Successfully signed in!')
 
           // Redirect to dashboard
           this.$router.push('/dashboard')
         } else {
-          this.error = data.message || 'Ошибка входа в систему'
+          this.error = data.message || 'Sign-in failed'
         }
       } catch (error) {
         console.error('Login error:', error)
-        this.error = 'Ошибка соединения с сервером'
+        this.error = 'Failed to connect to server'
       } finally {
         this.loading = false
       }
@@ -315,7 +315,7 @@ export default {
         await this.waitForGoogleOAuth()
         const cid = import.meta.env.VITE_GOOGLE_CLIENT_ID
         if (!cid) {
-          console.error('Google Client ID не настроен. Создайте .env с VITE_GOOGLE_CLIENT_ID="<your-client-id>" и перезапустите dev-сервер (npm run dev).')
+          console.error('Google Client ID not configured. Create .env with VITE_GOOGLE_CLIENT_ID="<your-client-id>" and restart the dev server (npm run dev).')
           this.loading = false
           return
         }
@@ -323,7 +323,7 @@ export default {
           client_id: cid,
           scope: 'openid email profile',
           callback: async (response) => {
-            if (response.error) { console.error('Ошибка авторизации Google: ' + response.error); this.loading = false; return }
+            if (response.error) { console.error('Google authorization error: ' + response.error); this.loading = false; return }
             try {
               const serverResponse = await fetch('/api/google-signup', {
                 method: 'POST',
@@ -334,14 +334,14 @@ export default {
               if (result.success) {
                 localStorage.setItem('token', result.token)
                 if (result.user) localStorage.setItem('user', JSON.stringify(result.user))
-                this.showToast('Успешный вход через Google!')
+                this.showToast('Successfully signed in with Google!')
                 this.$router.push('/dashboard')
               } else {
-                this.error = result.message || 'Ошибка входа через Google'
+                this.error = result.message || 'Google sign-in failed'
               }
             } catch (err) {
-              console.error('Ошибка при отправке токена на сервер:', err)
-              this.error = 'Ошибка при входе через Google. Попробуйте еще раз.'
+              console.error('Error sending token to server:', err)
+              this.error = 'Error signing in with Google. Please try again.'
             } finally {
               this.loading = false
             }
@@ -349,13 +349,13 @@ export default {
         })
         tokenClient.requestAccessToken()
       } catch (error) {
-        console.error('Ошибка при инициализации Google OAuth:', error)
-        this.error = 'Ошибка при инициализации Google OAuth. Попробуйте еще раз.'
+        console.error('Error initializing Google OAuth:', error)
+        this.error = 'Error initializing Google OAuth. Please try again.'
         this.loading = false
       }
     },
 
-    // Больше не нужен popup/One Tap — используем тот же поток, что и в Signup
+    // No longer need popup/One Tap — we use the same flow as in Signup
     
     waitForGoogleOAuth() {
       return new Promise((resolve, reject) => {
@@ -368,14 +368,14 @@ export default {
             attempts++
             setTimeout(checkGoogle, 100)
           } else {
-            reject(new Error('Google OAuth SDK не загрузился'))
+            reject(new Error('Google OAuth SDK did not load'))
           }
         }
         checkGoogle()
       })
     },
 
-    // Удалены ранее использовавшиеся One Tap и userinfo-флоу, чтобы полностью совпадало с Signup
+    // Previously used One Tap and userinfo flow removed to fully match Signup
 
     showToast(message) {
       // Simple toast implementation

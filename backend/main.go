@@ -3,15 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,9 +23,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
-
-// Lemon Squeezy webhook secret (set via env)
-var lemonWebhookSecret string
 
 // getEnvOrFile returns the value of the env var `key`.
 // If empty, and there is a companion var `key + "_FILE"`, it reads the value from that file path.
@@ -43,120 +38,7 @@ func getEnvOrFile(key string) string {
 	return ""
 }
 
-// handleLemonWebhook verifies signature and updates user's premium status
-func handleLemonWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if lemonWebhookSecret == "" {
-		http.Error(w, "Webhook secret not configured", http.StatusInternalServerError)
-		return
-	}
-
-	// Read raw body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read body", http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-
-	// Verify HMAC SHA256 signature from X-Signature header
-	sigHex := r.Header.Get("X-Signature")
-	if sigHex == "" {
-		http.Error(w, "Missing signature", http.StatusUnauthorized)
-		return
-	}
-	mac := hmac.New(sha256.New, []byte(lemonWebhookSecret))
-	mac.Write(body)
-	expected := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(strings.ToLower(sigHex)), []byte(strings.ToLower(expected))) {
-		http.Error(w, "Invalid signature", http.StatusUnauthorized)
-		return
-	}
-
-	// Parse payload
-	var payload struct {
-		Meta struct {
-			EventName  string                 `json:"event_name"`
-			CustomData map[string]interface{} `json:"custom_data"`
-		} `json:"meta"`
-		Data struct {
-			ID         string `json:"id"`
-			Attributes struct {
-				Status    string     `json:"status"`
-				UserEmail string     `json:"user_email"`
-				RenewsAt  *time.Time `json:"renews_at"`
-				EndsAt    *time.Time `json:"ends_at"`
-				VariantID int64      `json:"variant_id"`
-				ProductID int64      `json:"product_id"`
-			} `json:"attributes"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	event := payload.Meta.EventName
-	email := payload.Data.Attributes.UserEmail
-	if email == "" && payload.Meta.CustomData != nil {
-		if v, ok := payload.Meta.CustomData["email"].(string); ok {
-			email = v
-		}
-	}
-	if email == "" {
-		// No email to map user
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-		return
-	}
-
-	// Determine premium status
-	premium := false
-	plan := ""
-	periodEnd := time.Time{}
-	switch strings.ToLower(event) {
-	case "subscription_created", "subscription_resumed", "subscription_updated", "order_created":
-		if strings.ToLower(payload.Data.Attributes.Status) == "active" || payload.Data.Attributes.RenewsAt != nil {
-			premium = true
-		}
-		if payload.Data.Attributes.EndsAt != nil {
-			periodEnd = *payload.Data.Attributes.EndsAt
-		} else if payload.Data.Attributes.RenewsAt != nil {
-			periodEnd = *payload.Data.Attributes.RenewsAt
-		}
-	case "subscription_cancelled", "subscription_expired":
-		premium = false
-		if payload.Data.Attributes.EndsAt != nil {
-			periodEnd = *payload.Data.Attributes.EndsAt
-		}
-	}
-
-	// Update user by email in MongoDB
-	coll := database.Collection("users")
-	update := bson.M{
-		"$set": bson.M{
-			"premium":            premium,
-			"plan":               plan,
-			"ls_subscription_id": payload.Data.ID,
-			"current_period_end": periodEnd,
-		},
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := coll.UpdateOne(ctx, bson.M{"email": email}, update); err != nil {
-		log.Printf("lemon webhook: update user error: %v", err)
-		http.Error(w, "DB update error", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
-}
-
-// Transcribe YouTube by URL using yt-dlp + Whisper
+// handleTranscribeYouTube transcribes YouTube by URL using yt-dlp + Whisper
 func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -247,13 +129,107 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 						outBytes3c, err3c := ytdlpOutput(args3c...)
 						if err3c != nil {
 							log.Printf("yt-dlp chrome-cookies failed: %v; output: %s", err3c, string(outBytes3c))
-							JSONResponse(w, http.StatusConflict, map[string]interface{}{
-								"success": false,
-								"message": "Не удалось скачать аудио с YouTube без авторизации",
-								"details": string(outBytes3c),
-								"hint":    "Для гарантии работы: загрузите файл (видео/аудио) напрямую или укажите YTDLP_COOKIES=путь/к/cookies.txt.",
-							})
-							return
+							// Fallback 7: Try anonymous Piped API proxy (no YouTube auth required)
+							pipedBase := getEnvOrFile("PIPED_INSTANCE")
+							if pipedBase == "" {
+								pipedBase = "https://piped.video"
+							}
+							// Extract video ID from URL
+							var vid string
+							if u, perr := url.Parse(body.URL); perr == nil {
+								host := strings.ToLower(u.Host)
+								path := strings.Trim(u.Path, "/")
+								if strings.Contains(host, "youtu.be") {
+									vid = path
+								} else {
+									qv := u.Query().Get("v")
+									if qv != "" {
+										vid = qv
+									} else {
+										// handle /shorts/{id}, /embed/{id}
+										parts := strings.Split(path, "/")
+										if len(parts) > 0 {
+											vid = parts[len(parts)-1]
+										}
+									}
+								}
+							}
+							if vid != "" {
+								apiURL := fmt.Sprintf("%s/api/v1/streams/%s", strings.TrimRight(pipedBase, "/"), vid)
+								log.Printf("Piped fallback: GET %s", apiURL)
+								httpClient := &http.Client{Timeout: 60 * time.Second}
+								resp, perr := httpClient.Get(apiURL)
+								if perr == nil && resp != nil && resp.StatusCode == http.StatusOK {
+									var piped struct {
+										AudioStreams []struct {
+											URL      string `json:"url"`
+											Bitrate  int    `json:"bitrate"`
+											MimeType string `json:"mimeType"`
+										} `json:"audioStreams"`
+									}
+									bodyBytes, _ := io.ReadAll(resp.Body)
+									resp.Body.Close()
+									if jerr := json.Unmarshal(bodyBytes, &piped); jerr == nil && len(piped.AudioStreams) > 0 {
+										// pick highest bitrate
+										best := piped.AudioStreams[0]
+										for _, s := range piped.AudioStreams[1:] {
+											if s.Bitrate > best.Bitrate {
+												best = s
+											}
+										}
+										// decide extension by mime
+										ext := ".m4a"
+										if strings.Contains(strings.ToLower(best.MimeType), "webm") {
+											ext = ".webm"
+										}
+										// download stream
+										outAlt := filepath.Join(tmpDir, base+ext)
+										log.Printf("Piped fallback: downloading %s -> %s", best.URL, outAlt)
+										sresp, gerr := httpClient.Get(best.URL)
+										if gerr == nil && sresp != nil && sresp.StatusCode == http.StatusOK {
+											f, ferr := os.Create(outAlt)
+											if ferr == nil {
+												_, cerr := io.Copy(f, sresp.Body)
+												f.Close()
+												sresp.Body.Close()
+												if cerr == nil {
+													// Success: proceed with this file
+													log.Printf("Piped fallback: saved %s", outAlt)
+												} else {
+													log.Printf("Piped fallback: write error: %v", cerr)
+												}
+											} else {
+												log.Printf("Piped fallback: create file error: %v", ferr)
+											}
+										} else if sresp != nil {
+											if sresp.Body != nil {
+												sresp.Body.Close()
+											}
+											log.Printf("Piped fallback: stream GET failed: %s", sresp.Status)
+										} else if gerr != nil {
+											log.Printf("Piped fallback: stream GET error: %v", gerr)
+										}
+									} else {
+										if jerr != nil {
+											log.Printf("Piped fallback: JSON parse error: %v; body=%s", jerr, string(bodyBytes))
+										} else {
+											log.Printf("Piped fallback: no audioStreams found")
+										}
+									}
+								} else {
+									if resp != nil {
+										io.Copy(io.Discard, resp.Body)
+										resp.Body.Close()
+										log.Printf("Piped fallback: API status=%v", resp.Status)
+									}
+									if perr != nil {
+										log.Printf("Piped fallback: API error: %v", perr)
+									}
+								}
+							} else {
+								log.Printf("Piped fallback: cannot extract video ID from URL: %s", body.URL)
+							}
+							// After Piped attempt, continue to file detection below (base.*)
 						}
 					}
 				}
@@ -348,8 +324,8 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[handleGenerateAndSave] transcript_len=%d words=%d targetQuiz~=%d", len(reqBody.Transcript), words, targetQuiz)
 
-	// Улучшенный промпт для флешкарточек с подсчетом слов
-	systemPrompt := `Ты — профессиональный генератор flashcards и quiz для эффективного обучения.
+	// Улучшенный промпт для флешкарточек, квиза и краткого summary с подсчетом слов
+	systemPrompt := `Ты — профессиональный генератор flashcards, quiz и кратких конспектов (summary) для эффективного обучения.
 Я дам тебе текст. Твоя задача — сначала посчитать количество слов, а затем создать оптимальное количество карточек и вопросов по правилам ниже.
 
 1. Подсчёт слов
@@ -407,7 +383,11 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
   ]
 }
 
-ФОРМАТ ОТВЕТА: Верни только JSON с полями flashcards и quiz. Каждая flashcard должна содержать {term, definition, example?}. Каждый quiz вопрос должен содержать {id?, type, question, options?, answer?, correct?, rationale?}.`
+6. Summary (краткий конспект)
+Сгенерируй краткий, структурированный summary по тексту (на языке исходного текста), объёмом ~120–180 слов ИЛИ 5–7 сжатых пунктов. Фокус на ключевых идеях, фактах, определениях и выводах. Без воды, без выдумок.
+Разрешён формат Markdown (включая списки, жирный/курсив, заголовки, ССЫЛКИ И ТАБЛИЦЫ). Если уместно, можешь включить небольшую Markdown-таблицу для сравнения или структурирования данных.
+
+ФОРМАТ ОТВЕТА: Верни только JSON с полями: { "flashcards": [...], "quiz": ..., "summary": "...", "languageCode"? }. Каждая flashcard должна содержать {term, definition, example?}. Каждый quiz вопрос должен содержать {id?, type, question, options?, answer?, correct?, rationale?}.`
 
 	userPrompt := fmt.Sprintf(
 		"Language hint: %s\nAim for ~%d total quiz questions given transcript length (adjust down if insufficient material).\nTranscript:\n%s\n\nReturn JSON only.",
@@ -472,7 +452,7 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	var payloadRaw GeneratePayloadRaw
 	var payload GeneratePayload
 	parsed := false
-	
+
 	if err := json.Unmarshal([]byte(openaiResp.Choices[0].Message.Content), &payloadRaw); err != nil {
 		clean := strings.TrimSpace(openaiResp.Choices[0].Message.Content)
 		clean = strings.TrimPrefix(clean, "```json")
@@ -505,14 +485,15 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	} else {
 		parsed = true
 	}
-	
+
 	if parsed {
 		// Convert to final payload
 		payload = GeneratePayload{
 			Flashcards:   payloadRaw.Flashcards,
 			LanguageCode: payloadRaw.LanguageCode,
+			Summary:      payloadRaw.Summary,
 		}
-		
+
 		// Parse quiz structure
 		if len(payloadRaw.Quiz) > 0 {
 			// Try parsing as array first (old format)
@@ -525,7 +506,7 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 				if err := json.Unmarshal(payloadRaw.Quiz, &aiQuiz); err == nil {
 					// Convert to QuizQuestion array
 					var convertedQuiz []QuizQuestion
-					
+
 					// Add MCQ questions
 					for i, mcq := range aiQuiz.MultipleChoice {
 						convertedQuiz = append(convertedQuiz, QuizQuestion{
@@ -537,7 +518,7 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 							Correct:  true,
 						})
 					}
-					
+
 					// Add TF questions
 					for i, tf := range aiQuiz.TrueFalse {
 						answer := "False"
@@ -553,7 +534,7 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 							Correct:  tf.Answer,
 						})
 					}
-					
+
 					payload.Quiz = convertedQuiz
 					log.Printf("[handleGenerateAndSave] Converted AI quiz: MCQ=%d TF=%d total=%d", len(aiQuiz.MultipleChoice), len(aiQuiz.TrueFalse), len(convertedQuiz))
 				} else {
@@ -665,6 +646,7 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 	material := Material{
 		UserID:     userID,
 		Transcript: reqBody.Transcript,
+		Summary:    payload.Summary,
 		Flashcards: payload.Flashcards,
 		Quiz:       payload.Quiz,
 		CreatedAt:  time.Now(),
@@ -698,6 +680,7 @@ func handleGenerateAndSave(w http.ResponseWriter, r *http.Request) {
 		"material":   material,
 		"flashcards": respFlash,
 		"quiz":       respQuiz,
+		"summary":    material.Summary,
 	})
 }
 
@@ -1049,7 +1032,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build chat completion request
-	systemPrompt := `Ты — профессиональный генератор flashcards и quiz для эффективного обучения.
+	systemPrompt := `Ты — профессиональный генератор flashcards, quiz и кратких конспектов (summary) для эффективного обучения.
 Я дам тебе текст. Твоя задача — сначала посчитать количество слов, а затем создать оптимальное количество карточек и вопросов по правилам ниже.
 
 1. Подсчёт слов
@@ -1107,7 +1090,10 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
   ]
 }
 
-ФОРМАТ ОТВЕТА: Верни только JSON с полями flashcards и quiz. Каждая flashcard должна содержать {term, definition, example?}. Каждый quiz вопрос должен содержать {id?, type, question, options?, answer?, correct?, rationale?}.`
+6. Summary (краткий конспект)
+Сгенерируй краткий, структурированный summary по тексту (на языке исходного текста), объёмом ~120–180 слов ИЛИ 5–7 сжатых пунктов. Фокус на ключевых идеях, фактах, определениях и выводах. Без воды, без выдумок.
+
+ФОРМАТ ОТВЕТА: Верни только JSON с полями: { "flashcards": [...], "quiz": ..., "summary": "...", "languageCode"? }. Каждая flashcard должна содержать {term, definition, example?}. Каждый quiz вопрос должен содержать {id?, type, question, options?, answer?, correct?, rationale?}.`
 
 	chatReq := map[string]interface{}{
 		"model":           "gpt-4o-mini",
@@ -1186,6 +1172,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	payload := GeneratePayload{
 		Flashcards:   payloadRaw.Flashcards,
 		LanguageCode: payloadRaw.LanguageCode,
+		Summary:      payloadRaw.Summary,
 	}
 
 	// Parse quiz structure
@@ -1200,7 +1187,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(payloadRaw.Quiz, &aiQuiz); err == nil {
 				// Convert to QuizQuestion array
 				var convertedQuiz []QuizQuestion
-				
+
 				// Add MCQ questions
 				for i, mcq := range aiQuiz.MultipleChoice {
 					convertedQuiz = append(convertedQuiz, QuizQuestion{
@@ -1212,7 +1199,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 						Correct:  true,
 					})
 				}
-				
+
 				// Add TF questions
 				for i, tf := range aiQuiz.TrueFalse {
 					answer := "False"
@@ -1228,7 +1215,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 						Correct:  tf.Answer,
 					})
 				}
-				
+
 				payload.Quiz = convertedQuiz
 				log.Printf("[handleGenerate] Converted AI quiz: MCQ=%d TF=%d total=%d", len(aiQuiz.MultipleChoice), len(aiQuiz.TrueFalse), len(convertedQuiz))
 			} else {
@@ -1242,24 +1229,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		"success":    true,
 		"flashcards": payload.Flashcards,
 		"quiz":       payload.Quiz,
-	})
-}
-
-// SPA static files handler: serves files from dist and falls back to index.html
-func spaHandler(dist string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Try to serve the exact static file
-		reqPath := strings.TrimPrefix(r.URL.Path, "/")
-		// Protect against path traversal
-		reqPath = filepath.Clean(reqPath)
-		filePath := filepath.Join(dist, reqPath)
-		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
-			http.ServeFile(w, r, filePath)
-			return
-		}
-
-		// Fallback to index.html for SPA routes
-		http.ServeFile(w, r, filepath.Join(dist, "index.html"))
+		"summary":    payload.Summary,
 	})
 }
 
@@ -1307,6 +1277,23 @@ func loadDotEnv(paths ...string) {
 	}
 }
 
+// spaHandler returns a handler that serves files from dist, falling back to index.html
+func spaHandler(dist string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqPath := strings.TrimPrefix(r.URL.Path, "/")
+		// Protect against path traversal
+		reqPath = filepath.Clean(reqPath)
+		filePath := filepath.Join(dist, reqPath)
+		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, filePath)
+			return
+		}
+
+		// Fallback to index.html for SPA routes
+		http.ServeFile(w, r, filepath.Join(dist, "index.html"))
+	})
+}
+
 func main() {
 	// Load .env files so `go run .` works without manual exports
 	// Search project root and current dir when running from backend/
@@ -1323,12 +1310,6 @@ func main() {
 		jwtSecret = []byte(envSecret)
 	} else {
 		log.Println("⚠️  JWT_SECRET не задан, используется небезопасный дефолтный ключ. Задайте JWT_SECRET в окружении!")
-	}
-
-	// Lemon Squeezy webhook secret
-	lemonWebhookSecret = os.Getenv("LEMONSQUEEZY_WEBHOOK_SECRET")
-	if lemonWebhookSecret == "" {
-		log.Println("⚠️  LEMONSQUEEZY_WEBHOOK_SECRET не задан. Вебхук будет отклонять запросы.")
 	}
 
 	// Подключаемся к MongoDB
@@ -1383,26 +1364,12 @@ func main() {
 	r.HandleFunc("/api/notes/{id}", deleteNoteByID).Methods("DELETE")
 	r.HandleFunc("/api/materials/{id}", getMaterialByID).Methods("GET")
 	r.HandleFunc("/api/materials/{id}", deleteMaterialByID).Methods("DELETE")
-	r.HandleFunc("/api/lemonsqueezy/webhook", handleLemonWebhook).Methods("POST")
 
 	// Serve Vite build (dist) with SPA fallback
 	distPath := os.Getenv("FRONTEND_DIST")
 	if distPath == "" {
 		// Support Cloud Run / buildpacks convention
 		distPath = os.Getenv("STATIC_DIR")
-	}
-	if distPath == "" {
-		candidates := []string{
-			filepath.Join("..", "dist"),
-			"dist",
-			filepath.Join("..", "src", "dist"),
-		}
-		for _, c := range candidates {
-			if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
-				distPath = c
-				break
-			}
-		}
 	}
 	if distPath != "" {
 		log.Printf("📦 Serving frontend from: %s", distPath)

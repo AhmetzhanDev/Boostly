@@ -5,15 +5,15 @@
         <svg viewBox="0 0 24 24" width="20" height="20">
           <path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.42-1.41L7.83 13H20v-2z"/>
         </svg>
-        Назад
+        Back
       </button>
-      <h1 class="settings-title">Настройки</h1>
+      <h1 class="settings-title">Settings</h1>
     </header>
 
     <main class="settings-content">
       <!-- Account Information -->
       <section class="settings-section">
-        <h2 class="section-title">Информация об аккаунте</h2>
+        <h2 class="section-title">Account Information</h2>
         <div class="account-card">
           <div class="account-avatar">
             <div class="avatar-circle">
@@ -22,19 +22,19 @@
           </div>
           <div class="account-info">
             <div class="info-row">
-              <label>Имя пользователя:</label>
-              <span>{{ user.username || 'Не указано' }}</span>
+              <label>Username:</label>
+              <span>{{ user.username || 'Not specified' }}</span>
             </div>
             <div class="info-row">
               <label>Email:</label>
-              <span>{{ user.email || 'Не указано' }}</span>
+              <span>{{ user.email || 'Not specified' }}</span>
             </div>
             <div class="info-row">
-              <label>Дата регистрации:</label>
+              <label>Registration date:</label>
               <span>{{ formatDate(user.created_at) }}</span>
             </div>
             <div class="info-row">
-              <label>ID пользователя:</label>
+              <label>User ID:</label>
               <span class="user-id">{{ user.id }}</span>
             </div>
           </div>
@@ -43,28 +43,28 @@
 
       <!-- Statistics -->
       <section class="settings-section">
-        <h2 class="section-title">Статистика</h2>
+        <h2 class="section-title">Statistics</h2>
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-number">{{ notesCount }}</div>
-            <div class="stat-label">Заметок</div>
+            <div class="stat-label">Notes</div>
           </div>
           <div class="stat-card">
             <div class="stat-number">{{ materialsCount }}</div>
-            <div class="stat-label">Материалов</div>
+            <div class="stat-label">Materials</div>
           </div>
         </div>
       </section>
 
       <!-- Actions -->
       <section class="settings-section">
-        <h2 class="section-title">Действия</h2>
+        <h2 class="section-title">Actions</h2>
         <div class="actions-list">
           <button class="action-btn logout-btn" @click="showLogoutModal = true">
             <svg viewBox="0 0 24 24" width="20" height="20">
               <path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.59L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
             </svg>
-            Выйти из аккаунта
+            Log out
           </button>
         </div>
       </section>
@@ -79,9 +79,9 @@
           </svg>
         </div>
         <div class="logout-content">
-          <h3 class="logout-title">Выйти из аккаунта?</h3>
+          <h3 class="logout-title">Log out?</h3>
           <p class="logout-message">
-            Вы уверены, что хотите выйти из своего аккаунта?
+            Are you sure you want to log out of your account?
           </p>
         </div>
         <div class="logout-actions">
@@ -89,9 +89,9 @@
             <svg viewBox="0 0 24 24" width="16" height="16">
               <path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.59L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
             </svg>
-            Выйти
+            Log out
           </button>
-          <button class="btn btn-ghost" @click="showLogoutModal = false">Отмена</button>
+          <button class="btn btn-ghost" @click="showLogoutModal = false">Cancel</button>
         </div>
       </div>
     </div>
@@ -186,16 +186,16 @@ export default {
       }
     },
     formatDate(dateString) {
-      if (!dateString) return 'Не указано'
+      if (!dateString) return 'Not specified'
       try {
         const date = new Date(dateString)
-        return date.toLocaleDateString('ru-RU', {
+        return date.toLocaleDateString('en-US', {
           year: 'numeric',
           month: 'long',
           day: 'numeric'
         })
       } catch (error) {
-        return 'Не указано'
+        return 'Not specified'
       }
     },
     logout() {
@@ -208,7 +208,7 @@ export default {
       
       // Show success message if toast method exists
       if (this.$parent && this.$parent.toast) {
-        this.$parent.toast('Вы успешно вышли из аккаунта')
+        this.$parent.toast('You have successfully logged out')
       }
     }
   }

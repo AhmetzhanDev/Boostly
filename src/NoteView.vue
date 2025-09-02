@@ -55,7 +55,7 @@
         <div v-if="active==='note'" key="note">
         <div class="section">
           <h3>Summary</h3>
-          <p>{{ summary }}</p>
+          <div class="md" v-html="renderedSummary"></div>
         </div>
 
         <div class="section" v-if="note.audioUrl">
@@ -96,7 +96,7 @@
                   v-model="quizUi.shortAnswer" 
                   type="text" 
                   class="short-input" 
-                  placeholder="Введите ваш ответ..."
+                  placeholder="Enter your answer..."
                   @input="onShortAnswerInput"
                 />
               </div>
@@ -121,7 +121,7 @@
                   v-model="quizUi.shortAnswer" 
                   type="text" 
                   class="short-input" 
-                  placeholder="Введите ваш ответ..."
+                  placeholder="Enter your answer..."
                   @input="onShortAnswerInput"
                 />
               </div>
@@ -220,6 +220,17 @@
 </template>
 
 <script>
+import MarkdownIt from 'markdown-it'
+import createDOMPurify from 'dompurify'
+
+const md = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true
+})
+
+const DOMPurify = createDOMPurify(window)
+
 export default {
   name: 'NoteView',
   data() {
@@ -258,12 +269,24 @@ export default {
       const list = (this.note && this.note.flashcards) ? this.note.flashcards : []
       return list[this.currentIdx] || {}
     },
-    // Note summary
+    // Legacy plain-text fallback summary (first sentences of transcript)
     summary() {
       if (!this.note || !this.note.transcript) return '—'
       const t = this.note.transcript.trim()
       const parts = t.split(/[.!?]\s+/).slice(0, 2).join('. ')
       return (parts || t).slice(0, 300)
+    },
+    // Rendered Markdown summary as sanitized HTML
+    renderedSummary() {
+      const raw = (this.note && typeof this.note.summary === 'string' && this.note.summary.trim())
+        ? this.note.summary
+        : this.summary
+      try {
+        const html = md.render(String(raw || ''))
+        return DOMPurify.sanitize(html)
+      } catch (e) {
+        return DOMPurify.sanitize(String(raw || ''))
+      }
     },
     // Quiz computed
     currentQuestion() {
@@ -449,7 +472,7 @@ export default {
             console.log(`Skipping question ${index}: not an object`)
             return
           }
-          const type = (q.type || q.Type || '').toUpperCase()
+          const type = (q.type || '').toUpperCase()
           let options = Array.isArray(q.options) ? q.options.slice() : []
           let answer = q.answer
           let correct = Array.isArray(q.correct) ? q.correct.slice() : undefined
@@ -506,6 +529,7 @@ export default {
         createdAt: created,
         audioUrl: m?.audioUrl, // may be undefined
         transcript,
+        summary: m?.summary || '',
         flashcards: m?.flashcards || [],
         quiz: m?.quiz || []
       }
@@ -534,40 +558,40 @@ export default {
       this.quizList = a
       this.resetQuiz()
     },
-    buildQuizPrompt(sourceText, lang = 'ru') {
+    buildQuizPrompt(sourceText, lang = 'en') {
       return [
-        'Задача: проанализируй предоставленный текст и выдели все ключевые факты, даты, определения, причинно‑следственные связи, сущности и их атрибуты. На основе извлечённых данных сгенерируй набор вопросов, который полно и без избыточности покрывает важный материал.',
+        'Task: analyze the provided text and extract all key facts, dates, definitions, cause-and-effect relationships, entities, and their attributes. Based on the extracted data, generate a set of questions that fully and without redundancy cover the important material.',
         '',
-        'Требования:',
-        '- Сгенерируй столько вопросов, сколько объективно нужно для полного охвата содержания. Не придумывай то, чего нет в тексте.',
-        '- Чередуй типы вопросов: 1) один правильный ответ + правдоподобные дистракторы, 2) True/False, 3) с пропуском ключевого слова (cloze).',
-        '- Формулируй вопросы кратко и ясно.',
-        '- Дистракторы правдоподобные и тематически близкие.',
-        '- Для cloze используй ровно один пропуск «_____». Ответ должен точно соответствовать пропуску.',
-        '- Не повторяй по смыслу одинаковые вопросы.',
-        '- Сохраняй важные числа/даты/определения.',
-        `- Язык вывода: ${lang}.`,
+        'Requirements:',
+        '- Generate as many questions as objectively needed to fully cover the content. Do not invent anything that is not in the text.',
+        '- Alternate question types: 1) one correct answer + plausible distractors, 2) True/False, 3) with a missing key word (cloze).',
+        '- Formulate questions briefly and clearly.',
+        '- Distractors are plausible and thematically close.',
+        '- For cloze, use exactly one blank space «_____». The answer must exactly match the blank space.',
+        '- Do not repeat questions with the same meaning.',
+        '- Preserve important numbers/dates/definitions.',
+        `- Output language: ${lang}.`,
         '',
-        'Формат вывода строго в JSON:',
+        'Output format strictly in JSON:',
         '{',
         '  "questions": [',
         '    {',
         '      "type": "mcq" | "true_false" | "cloze",',
-        '      "question": "текст вопроса",',
+        '      "question": "question text",',
         '      "options": ["A", "B", "C", "D"],',
-        '      "answer": "строка или true/false",',
-        '      "explanation": "краткое обоснование из текста"',
+        '      "answer": "string or true/false",',
+        '      "explanation": "brief justification from the text"',
         '    }',
         '  ],',
-        '  "coverage_note": "1-2 предложения, почему набор вопросов покрывает все ключевые моменты"',
+        '  "coverage_note": "1-2 sentences, why the set of questions covers all key points"',
         '}',
         '',
-        'Ограничения:',
-        '- Не добавляй ничего вне указанного JSON.',
-        '- Источник только предоставленный текст: никаких внешних знаний.',
-        '- Количество вопросов не фиксировано: ориентируйся на плотность фактов.',
+        'Constraints:',
+        '- Do not add anything outside the specified JSON.',
+        '- The source is only the provided text: no external knowledge.',
+        '- The number of questions is not fixed: focus on the density of facts.',
         '',
-        'Текст для анализа:',
+        'Text for analysis:',
         '"""',
         sourceText,
         '"""'
@@ -635,12 +659,12 @@ export default {
       if (!this.note || !this.note.transcript) return
       const apiKey = import.meta.env.OPENAI_API_KEY
       if (!apiKey) {
-        alert('OPENAI_API_KEY не найден. Задайте OPENAI_API_KEY в .env и перезапустите дев-сервер.')
+        alert('OPENAI_API_KEY not found. Set OPENAI_API_KEY in .env and restart the dev server (npm run dev).')
         return
       }
       try {
         this.genLoading = true
-        const prompt = this.buildQuizPrompt(this.note.transcript, 'ru')
+        const prompt = this.buildQuizPrompt(this.note.transcript, 'en')
         const resp = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -650,7 +674,7 @@ export default {
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             messages: [
-              { role: 'system', content: 'Ты помогаешь создавать учебные квизы. Отвечай строго в JSON по формату.' },
+              { role: 'system', content: 'You are helping to create educational quizzes. Respond strictly in JSON format.' },
               { role: 'user', content: prompt }
             ],
             temperature: 0.2
@@ -661,12 +685,12 @@ export default {
         const content = data?.choices?.[0]?.message?.content || ''
         const parsed = this.parseJsonSafe(content)
         const mapped = this.mapQuizResponse(parsed)
-        if (!mapped.length) throw new Error('Не удалось распарсить вопросы')
+        if (!mapped.length) throw new Error('Failed to parse questions')
         this.quizList = this.normalizeQuiz(mapped)
         this.resetQuiz()
       } catch (e) {
         console.error('Quiz generation failed', e)
-        alert('Не удалось сгенерировать квиз: ' + (e?.message || e))
+        alert('Failed to generate quiz: ' + (e?.message || e))
       } finally {
         this.genLoading = false
       }

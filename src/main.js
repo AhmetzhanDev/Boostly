@@ -8,7 +8,7 @@ const app = createApp(App)
 app.use(router)
 app.mount('#app')
 
-// Инициализация анимаций после монтирования приложения
+// Initialize animations after the app is mounted
 document.addEventListener('DOMContentLoaded', () => {
   initAllAnimations();
 }); 

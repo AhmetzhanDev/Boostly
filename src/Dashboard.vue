@@ -20,8 +20,8 @@
                 <div class="pm-mail">{{ userEmail }}</div>
               </div>
             </div>
-            <button class="pm-item" @click="goSettings"><span>⚙️</span> Настройки</button>
-            <button class="pm-item danger" @click="logout"><span>🚪</span> Выйти</button>
+            <button class="pm-item" @click="goSettings"><span>⚙️</span> Settings</button>
+            <button class="pm-item danger" @click="logout"><span>🚪</span> Log out</button>
           </div>
         </div>
         
@@ -146,11 +146,11 @@
           <div class="qa-ico" :class="[card.color, card.key]">
             <!-- Blank document -->
             <svg v-if="card.key==='blank'" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM15 9V3.5L20.5 9H15z"/>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM15 9V3.5L20.5 9H15z"fill="#ffffff"/>
             </svg>
             <!-- Microphone -->
             <svg v-else-if="card.key==='audio'" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-4v1a5 5 0 0 1-10 0v-1H5v1a7 7 0 0 0 6 6v3h2v-3a7 7 0 0 0 6-6v-1h-2z"/>
+              <path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-4v1a5 5 0 0 1-10 0v-1H5v1a7 7 0 0 0 6 6v3h2v-3a7 7 0 0 0 6-6v-1h-2z"fill="#ffffff"/>
             </svg>
             <!-- Document upload (DOC tag) -->
             <svg v-else-if="card.key==='doc'" viewBox="0 0 24 24" aria-hidden="true" class="doc-svg">
@@ -203,7 +203,7 @@
             <div class="note-title">{{ note.title }}</div>
             <div class="note-meta">Last opened {{ note.lastOpened }}</div>
           </div>
-          <button class="note-more" @click.stop="moreNote(note)" title="Удалить заметку">
+          <button class="note-more" @click.stop="moreNote(note)" title="Delete note">
             <svg viewBox="0 0 24 24" width="16" height="16" class="trash-icon">
               <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
               <line x1="10" y1="11" x2="10" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -229,7 +229,10 @@
           <div class="rec-center">
             <button class="mic-btn" :class="{ recording: isRecording }" @click="toggleRecord" aria-label="Toggle recording">
               <svg v-if="!isRecording" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
-                <path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-4v1a5 5 0 0 1-10 0v-1H5v1a7 7 0 0 0 6 6v3h2v-3a7 7 0 0 0 6-6v-1h-2z" fill="currentColor"/>
+                <path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-4v1a5 5 0 0 1-10 0v-1H5v1a7 7 0 0 0 6 6v3h2v-3a7 7 0 0 0 6-6v-1h-2z"/>
+              </svg>
+              <svg v-else-if="isPaused" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+                <path fill="currentColor" d="M8 5v14l11-7z"/>
               </svg>
               <svg v-else viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
                 <rect x="6" y="5" width="4" height="14" rx="1" fill="#111"/>
@@ -251,6 +254,44 @@
           </div>
 
           <div class="rec-actions" style="justify-content:center; margin-top:8px;">
+            <!-- Start/Stop recording controls -->
+            <template v-if="!isRecording">
+              <button class="btn" @click="startRecording" aria-label="Start recording">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-4v1a5 5 0 0 1-10 0v-1H5v1a7 7 0 0 0 6 6v3h2v-3a7 7 0 0 0 6-6v-1h-2z"/>
+                </svg>
+                <span style="margin-left:6px">Start</span>
+              </button>
+            </template>
+            <template v-else-if="isPaused">
+              <button class="btn" @click="resumeRecording" aria-label="Resume recording">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path fill="currentColor" d="M8 5v14l11-7z"/>
+                </svg>
+                <span style="margin-left:6px">Resume</span>
+              </button>
+              <button class="btn btn-danger" @click="finishRecording" aria-label="Finish recording" style="margin-left:8px">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/>
+                </svg>
+                <span style="margin-left:6px">Finish</span>
+              </button>
+            </template>
+            <template v-else>
+              <button class="btn" @click="pauseRecording" aria-label="Pause recording">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path fill="currentColor" d="M7 6h4v12H7zM13 6h4v12h-4z"/>
+                </svg>
+                <span style="margin-left:6px">Pause</span>
+              </button>
+              <button class="btn btn-danger" @click="finishRecording" aria-label="Finish recording" style="margin-left:8px">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/>
+                </svg>
+                <span style="margin-left:6px">Finish</span>
+              </button>
+            </template>
+            
             <input ref="fileInput" type="file" accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg,.aac,.flac" @change="onFilePicked" style="display:none" />
             <button class="btn btn-ghost" :class="{disabled: isRecording}" @click="$refs.fileInput && $refs.fileInput.click()" :disabled="isRecording" aria-label="Upload audio">
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5 20h14a1 1 0 0 0 1-1v-7h-2v6H6V12H4v7a1 1 0 0 0 1 1zm7-16-5 5h3v4h4v-4h3l-5-5z"/></svg>
@@ -262,7 +303,7 @@
             </button>
           </div>
 
-          <div v-if="audioUrl" class="audio-preview">
+          <div class="audio-preview">
             <!-- Hidden audio element controlled by custom UI -->
             <audio ref="player" :src="audioUrl" preload="metadata" @timeupdate="onTimeUpdate" @loadedmetadata="onLoadedMeta" @ended="onEnded" style="display:none"></audio>
 
@@ -294,22 +335,22 @@
           <button class="modal-close" @click="closeUpgradeModal" aria-label="Close">✕</button>
         </div>
         <div class="modal-body">
-          <div class="premium-intro">Разблокируйте все возможности без ограничений</div>
+          <div class="premium-intro">Unlock all features without limits</div>
           <div class="pricing">
             <div class="plan">
-              <div class="plan-name">Месяц</div>
-              <div class="plan-price"><span class="n">1</span> тг<span class="per">/мес</span></div>
-              <button class="btn primary" @click="selectPlan('monthly')">Выбрать</button>
+              <div class="plan-name">Monthly</div>
+              <div class="plan-price"><span class="n">1</span> KZT<span class="per">/mo</span></div>
+              <button class="btn primary" @click="selectPlan('monthly')">Choose</button>
             </div>
             <div class="plan best">
-              <div class="badge">Популярно</div>
-              <div class="plan-name">Год</div>
-              <div class="plan-price"><span class="n">12</span> тг<span class="per">/год</span></div>
-              <div class="note">Экономия 0%</div>
-              <button class="btn primary" @click="selectPlan('yearly')">Выбрать</button>
+              <div class="badge">Popular</div>
+              <div class="plan-name">Yearly</div>
+              <div class="plan-price"><span class="n">12</span> KZT<span class="per">/year</span></div>
+              <div class="note">Save 0%</div>
+              <button class="btn primary" @click="selectPlan('yearly')">Choose</button>
             </div>
           </div>
-          <div class="fine">Оплата — демо-заглушка. Интеграция с платежами будет добавлена позднее.</div>
+          <div class="fine">Payment is a demo stub. Payment integration will be added later.</div>
         </div>
       </div>
     </div>
@@ -344,10 +385,10 @@
           </svg>
         </div>
         <div class="delete-content">
-          <h3 class="delete-title">Удалить запись?</h3>
+          <h3 class="delete-title">Delete item?</h3>
           <p class="delete-message">
-            Вы уверены, что хотите удалить <strong>"{{ deleteModal.item?.title }}"</strong>?
-            <br>Это действие нельзя отменить.
+            Are you sure you want to delete <strong>"{{ deleteModal.item?.title }}"</strong>?
+            <br>This action cannot be undone.
           </p>
         </div>
         <div class="delete-actions">
@@ -355,9 +396,9 @@
             <svg viewBox="0 0 24 24" width="16" height="16">
               <path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
             </svg>
-            Удалить
+            Delete
           </button>
-          <button class="btn btn-ghost" @click="closeDeleteModal">Отмена</button>
+          <button class="btn btn-ghost" @click="closeDeleteModal">Cancel</button>
         </div>
       </div>
     </div>
@@ -386,20 +427,7 @@
                 <span class="badge" :class="proc.step1.done?'ok':''">{{ proc.step1.done ? 'Completed' : 'Pending' }}</span>
               </div>
             </li>
-            <li class="step-item" :class="{done: proc.step2.done}">
-              <div class="left"><span class="num">2</span></div>
-              <div class="mid">
-                <div class="stitle">Record is uploading</div>
-                <div class="progress-line" v-if="!proc.step2.done">
-                  <div class="progress-fill" :style="{ width: (proc.step2.progress||0) + '%' }"></div>
-                </div>
-                <div class="sdesc" v-if="!proc.step2.done">{{ proc.step2.progress }}%</div>
-              </div>
-              <div class="right">
-                <span v-if="!proc.step2.done" class="spinner" aria-hidden="true"></span>
-                <span class="badge" :class="proc.step2.done?'ok':''">{{ proc.step2.done ? 'Completed' : proc.step2.progress + '%' }}</span>
-              </div>
-            </li>
+        
             <li class="step-item" :class="{done: proc.step3.done}">
               <div class="left"><span class="num">3</span></div>
               <div class="mid">
@@ -495,6 +523,7 @@ export default {
       // Settings
       autoRedirect: (localStorage.getItem('autoRedirect') || 'true') === 'true',
       isRecording: false,
+      isPaused: false,
       elapsedSec: 0,
       audioUrl: null,
       barHeights: Array(32).fill(8),
@@ -709,7 +738,7 @@ export default {
         this.proc.transcript = transcript
       } catch (e) {
         console.error(e)
-        this.proc.error = 'Не удалось транскрибировать видео YouTube: ' + (e?.message || e)
+        this.proc.error = 'Failed to transcribe YouTube video: ' + (e?.message || e)
         return
       }
       // Step 4: AI generate as usual
@@ -755,13 +784,15 @@ export default {
         }
       } catch (e) {
         console.error(e)
-        this.proc.error = 'Ошибка генерации материалов: ' + (e?.message || e)
+        this.proc.error = 'Error generating materials: ' + (e?.message || e)
         return
       }
+      
     },
+    
     toggleSidebar(){ this.sidebarOpen = !this.sidebarOpen },
     goSettings(){ this.$router.push('/settings') },
-    upgrade(){ this.showUpgradeModal = true },
+    upgrade(){ this.$router.push('/pricing') },
     closeUpgradeModal(){ this.showUpgradeModal = false },
     selectPlan(kind){
       // Заглушка выбора тарифа. Здесь можно интегрировать платежи.
@@ -861,22 +892,24 @@ export default {
         if (response.ok) {
           // Удаляем из локального списка
           this.notes = this.notes.filter(n => n.id !== noteId)
-          this.toast(isNote ? 'Заметка удалена' : 'Материал удален')
+          this.toast(isNote ? 'Note deleted' : 'Material deleted')
         } else {
-          this.toast('Ошибка при удалении')
+          this.toast('Error deleting')
         }
       } catch (error) {
         console.error('Delete error:', error)
-        this.toast('Ошибка при удалении')
+        this.toast('Error deleting')
       }
     },
 
     // Audio recording logic
     async toggleRecord() {
-      if (this.isRecording) {
-        await this.stopRecording()
-      } else {
+      if (!this.isRecording) {
         await this.startRecording()
+      } else if (!this.isPaused) {
+        await this.pauseRecording()
+      } else {
+        await this.resumeRecording()
       }
     },
     async startRecording() {
@@ -901,8 +934,9 @@ export default {
         }
         this._mediaRecorder.start()
         this.isRecording = true
+        this.isPaused = false
         this.elapsedSec = 0
-        this._timer = setInterval(() => { this.elapsedSec++ }, 1000)
+        this._timer = setInterval(() => { if (this.isRecording && !this.isPaused) this.elapsedSec++ }, 1000)
 
         // Setup analyser for visualization
         const AudioCtx = window.AudioContext || window.webkitAudioContext
@@ -931,6 +965,22 @@ export default {
         this.toast('Microphone access denied')
       }
     },
+    async pauseRecording() {
+      try {
+        if (this._mediaRecorder && this._mediaRecorder.state === 'recording') {
+          this._mediaRecorder.pause()
+          this.isPaused = true
+        }
+      } catch (e) { console.warn('pauseRecording error', e) }
+    },
+    async resumeRecording() {
+      try {
+        if (this._mediaRecorder && this._mediaRecorder.state === 'paused') {
+          this._mediaRecorder.resume()
+          this.isPaused = false
+        }
+      } catch (e) { console.warn('resumeRecording error', e) }
+    },
     async stopRecording() {
       try {
         if (this._timer) { clearInterval(this._timer); this._timer = null }
@@ -939,8 +989,10 @@ export default {
         }
       } finally {
         this.isRecording = false
+        this.isPaused = false
       }
     },
+    async finishRecording() { await this.stopRecording() },
     cleanupStream() {
       if (this._mediaStream) {
         this._mediaStream.getTracks().forEach(t => t.stop())
@@ -968,7 +1020,7 @@ export default {
     },
     async generateNote() {
       if (!this.audioBlob || this.isRecording) {
-        this.toast('Сначала запишите аудио')
+        this.toast('Please record audio first')
         return
       }
       // Open processing modal
@@ -983,7 +1035,7 @@ export default {
         this.proc.step3.done = true
         this.proc.transcript = transcript
       } catch (e) {
-        this.proc.error = 'Ошибка загрузки/транскрибации'
+        this.proc.error = 'Error uploading/transcribing'
         console.error(e)
         return
       }
@@ -1029,7 +1081,7 @@ export default {
           setTimeout(() => { this.viewNoteNow() }, 350)
         }
       } catch (e) {
-        this.proc.error = 'Ошибка генерации материалов: ' + (e?.message || e)
+        this.proc.error = 'Error generating materials: ' + (e?.message || e)
         console.error(e)
         return
       }
@@ -1106,12 +1158,12 @@ export default {
               }
             } else if (resp.status !== 401 && resp.status !== 403) {
               const errBody = await resp.text().catch(() => '')
-              throw new Error(`Ошибка сервера (${resp.status}): ${errBody || 'generate-and-save failed'}`)
+              throw new Error(`Server error (${resp.status}): ${errBody || 'generate-and-save failed'}`)
             }
             // Если 401/403 — тихий переход к локальной генерации
           } catch (e) {
             if (e && e.name === 'AbortError') {
-              throw new Error('Таймаут генерации (generate-and-save)')
+              throw new Error('Generation timeout (generate-and-save)')
             }
             // Прочие ошибки — пробуем фоллбэк ниже
             if (String(e?.message||'').includes('Таймаут')) throw e
@@ -1126,7 +1178,7 @@ export default {
         }, 60000)
         if (!resp2.ok) {
           const errBody2 = await resp2.text().catch(() => '')
-          throw new Error(`Ошибка сервера (${resp2.status}): ${errBody2 || 'generate failed'}`)
+          throw new Error(`Server error (${resp2.status}): ${errBody2 || 'generate failed'}`)
         }
         const data2 = await resp2.json().catch(() => ({}))
         return { flashcards: data2.flashcards || [], quiz: data2.quiz || [] }
@@ -1199,10 +1251,10 @@ export default {
         this.audioBlob = file
         try { if (this.audioUrl) URL.revokeObjectURL(this.audioUrl) } catch(_){}
         this.audioUrl = URL.createObjectURL(file)
-        this.toast && this.toast('Аудиофайл добавлен')
+        this.toast && this.toast('Audio file added')
       } catch (err) {
         console.error('onFilePicked error', err)
-        this.toast && this.toast('Не удалось прочитать файл')
+        this.toast && this.toast('Failed to read file')
       } finally {
         // очистим value, чтобы можно было выбрать тот же файл повторно
         try { if (this.$refs.fileInput) this.$refs.fileInput.value = '' } catch(_){}
@@ -1233,7 +1285,7 @@ export default {
 .pm-avatar { width:40px; height:40px; border-radius:50%; display:grid; place-items:center; font-weight:900; background: linear-gradient(135deg, #7C3AED55, #00D4FF33); box-shadow: inset 0 0 0 2px rgba(124,58,237,.45); }
 .pm-name { font-weight:800; }
 .pm-mail { color: var(--muted); font-size:12px; }
-.pm-item { width:100%; display:flex; align-items:center; gap:10px; height:40px; border-radius:10px; border:1px solid var(--line); background: rgba(255,255,255,.04); color: var(--text); cursor:pointer; padding:0 10px; }
+.pm-item { width:100%; display:flex; align-items:center; gap:10px; height:40px; border-radius:10px; border:1px solid var(--line); background: rgba(255,255,255,.04); color: var(--text); cursor:pointer; }
 .pm-item + .pm-item { margin-top:8px; }
 .pm-item:hover { box-shadow: 0 0 0 1px rgba(0,212,255,.18) inset; }
 .pm-item.danger { border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.12); color:#fecaca; }
@@ -1309,7 +1361,7 @@ export default {
 
 /* Page header row & search */
 .ph-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.search-wrap { position:relative; display:flex; align-items:center; gap:10px; height:40px; padding:0 12px 0 36px; border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.035); min-width:260px; }
+.search-wrap { position:relative; display:flex; align-items:center; gap:10px; height:40px; padding:0 12px 0 36px; border-radius:12px; border:1px solid var(--line); background: rgba(255,255,255,.035); min-width:260px; }
 .search-wrap svg { position:absolute; left:12px; opacity:.7; }
 .search { background:transparent; border:none; outline:none; color:var(--text); width:220px; }
 .slash { margin-left:auto; color:var(--muted); background:rgba(255,255,255,.06); border:1px solid var(--line); border-bottom-width:2px; padding:2px 6px; border-radius:6px; font-size:12px; }
@@ -1326,8 +1378,6 @@ export default {
 
 /* SVGs inside icons */
 .qa-ico svg { width:22px; height:22px; display:block; }
-.qa-ico.doc svg { width:28px; height:28px; }
-.qa-ico path { fill:#fff; }
 .qa-ico rect { fill:#fff; }
 .qa-ico.yt rect { fill:#FF0000; }
 .qa-ico.yt polygon { fill:#FFFFFF; }
@@ -1490,7 +1540,7 @@ export default {
 .mic-btn.recording { background:#ef4444; border-color: rgba(239,68,68,.6); }
 .mic-btn.recording:hover { background:#dc2626; }
 .rec-bar { display:flex; align-items:center; gap:12px; background: rgba(255,255,255,.06); border:1px solid var(--line); padding:10px 12px; border-radius:12px; width: max(260px, 60%); margin: 0 auto; }
-.pill { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; background:#111; color:#fff; font-size:12px; border:1px solid var(--line); }
+.pill { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; background:#111; color:#fff; border:1px solid var(--line); }
 .rec-actions { display:flex; align-items:center; justify-content:center; gap:12px; }
 .btn-ghost { height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--text); }
 .btn.primary { height:36px; padding:0 14px; border-radius:10px; border:1px solid rgba(124,58,237,.5); background: linear-gradient(90deg,#7C3AED,#A78BFA); color:#fff; box-shadow: 0 6px 18px rgba(124,58,237,.35); display:inline-flex; align-items:center; }
@@ -1524,12 +1574,12 @@ export default {
 .plan .note { color: var(--muted); font-size:12px; margin-top:-4px; }
 .fine { color: var(--muted); font-size:12px; margin-top:12px; text-align:center; }
 .num { width:22px; height:22px; border-radius:999px; display:grid; place-items:center; background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); font-size:12px; font-weight:800; box-shadow: none !important; }
-.stitle { font-weight:700; }
+
 .sdesc { color: var(--muted); font-size:12px; margin-top:4px; }
 .right { display:flex; align-items:center; gap:8px; }
 .badge { height:24px; padding:0 8px; border-radius:999px; border:1px solid var(--line); background: rgba(255,255,255,.04); color: var(--text); font-size:12px; display:inline-flex; align-items:center; }
 .badge.ok { background: rgba(34,197,94,.15); border-color: rgba(34,197,94,.35); color:#10B981; }
-.spinner { width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,.2); border-top-color:#7C3AED; animation: spin 1s linear infinite; }
+.spinner { width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,.2); border-top-color:#ffffff; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg) } }
 @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
 @keyframes popIn { from { opacity:.6; transform: scale(.98) } to { opacity:1; transform: scale(1) } }
