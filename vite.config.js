@@ -8,8 +8,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       open: true,
-      
-      
+     
     },
     define: {
       'import.meta.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY || '')

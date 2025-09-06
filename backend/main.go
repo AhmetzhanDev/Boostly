@@ -85,22 +85,72 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 
 	outPattern := filepath.Join(tmpDir, base+".%(ext)s")
 	// Optional cookies.txt from env to avoid browser permissions
-	cookiesArgs := []string{}
-	if cp := os.Getenv("YTDLP_COOKIES"); cp != "" {
-		if _, err := os.Stat(cp); err == nil {
-			cookiesArgs = []string{"--cookies", cp}
-			log.Printf("yt-dlp will use cookies file: %s", cp)
+	var cookiesArgs []string
+	cp := getEnvOrFile("YTDLP_COOKIES")
+	if cp == "" {
+		log.Println("INFO: YTDLP_COOKIES environment variable not set. Will try --cookies-from-browser as fallback.")
+		// Fallback: try to extract cookies from browser automatically
+		cookiesArgs = []string{"--cookies-from-browser", "chrome"}
+	} else if _, err := os.Stat(cp); err == nil {
+		// случай 1: YTDLP_COOKIES = путь к файлу
+		cookiesArgs = []string{"--cookies", cp}
+		log.Printf("SUCCESS: yt-dlp will use cookies file at: %s", cp)
+	} else {
+		// случай 2: YTDLP_COOKIES = содержимое
+		tmp := "/tmp/yt-cookies.txt"
+		if err := os.WriteFile(tmp, []byte(cp), 0o600); err != nil {
+			log.Printf("ERROR: failed to write cookies from env to file: %v", err)
+			// Fallback to browser cookies if file creation fails
+			cookiesArgs = []string{"--cookies-from-browser", "chrome"}
 		} else {
-			log.Printf("cookies file not found at YTDLP_COOKIES=%s (ignored)", cp)
+			cookiesArgs = []string{"--cookies", tmp}
+			log.Printf("SUCCESS: yt-dlp will use cookies from env, written to: %s", tmp)
 		}
 	}
 
-	// Define a helper to try different player clients without cookies
+	// Log chosen cookies mode and output pattern for diagnostics
+	cookiesMode := "none"
+	if len(cookiesArgs) >= 2 && cookiesArgs[0] == "--cookies" {
+		cookiesMode = "file:" + cookiesArgs[1]
+	} else if len(cookiesArgs) >= 2 && cookiesArgs[0] == "--cookies-from-browser" {
+		cookiesMode = "from-browser:" + cookiesArgs[1]
+	}
+	log.Printf("yt-dlp: cookiesMode=%s outPattern=%s base=%s", cookiesMode, outPattern, base)
+
+	// Define a helper to try different player clients with cookies if available
 	tryClient := func(clientName string, format string) ([]byte, error) {
-		args := append([]string{"-R", "3", "--fragment-retries", "3", "--force-ipv4", "--geo-bypass", "--extractor-args", fmt.Sprintf("youtube:player_client=%s", clientName), "-f", format, "-x", "--audio-format", "mp3", "-o", outPattern}, cookiesArgs...)
+		args := append([]string{
+			"-R", "3",
+			"--fragment-retries", "3",
+			"--force-ipv4",
+			"--geo-bypass",
+			"--no-check-certificate",
+			"--add-header", "Accept-Language: en-US,en;q=0.9,ru;q=0.8",
+			"--referer", "https://www.youtube.com/",
+			"--extractor-args", fmt.Sprintf("youtube:player_client=%s", clientName),
+			"-f", format,
+			"-x",
+			"--audio-format", "mp3",
+			"-o", outPattern,
+		}, cookiesArgs...)
 		args = append(args, body.URL)
 		log.Printf("yt-dlp try-client=%s args=%v", clientName, args)
 		return ytdlpOutput(args...)
+	}
+
+	// Helper to check if error is authentication-related
+	isAuthError := func(output []byte) bool {
+		// Normalize quotes/case to catch messages like “you’re” vs "you're"
+		s := strings.ToLower(string(output))
+		s = strings.ReplaceAll(s, "’", "'")
+		return strings.Contains(s, "sign in to confirm you're not a bot") ||
+			strings.Contains(s, "sign in to confirm you") ||
+			strings.Contains(s, "this video is not available") ||
+			strings.Contains(s, "private video") ||
+			strings.Contains(s, "video unavailable") ||
+			strings.Contains(s, "cookies are no longer valid") ||
+			strings.Contains(s, "use --cookies-from-browser") ||
+			strings.Contains(s, "requires authentication")
 	}
 
 	// attempt 1: web client with strict non-HLS preference
@@ -123,8 +173,22 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 					outBytesT, errT := tryClient("tvhtml5", "bestaudio[ext=m4a]/bestaudio/best")
 					if errT != nil {
 						log.Printf("yt-dlp attempt5 (tvhtml5) failed: %v; output: %s", errT, string(outBytesT))
-						// attempt 6: optional chrome cookies if available (no Safari to avoid permissions)
-						args3c := []string{"--cookies-from-browser", "chrome", "-R", "3", "--fragment-retries", "3", "--force-ipv4", "--geo-bypass", "--extractor-args", "youtube:player_client=web", "-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "mp3", "-o", outPattern, body.URL}
+						// attempt 6: try with updated yt-dlp and additional bypass options
+						args3c := []string{
+							"--cookies-from-browser", "chrome",
+							"-R", "3",
+							"--fragment-retries", "3",
+							"--force-ipv4",
+							"--geo-bypass",
+							"--no-check-certificate",
+							"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+							"--extractor-args", "youtube:player_client=web,youtube:skip=hls",
+							"-f", "bestaudio[ext=m4a]/bestaudio/best",
+							"-x",
+							"--audio-format", "mp3",
+							"-o", outPattern,
+							body.URL,
+						}
 						log.Printf("yt-dlp retry (with Chrome cookies): args=%v", args3c)
 						outBytes3c, err3c := ytdlpOutput(args3c...)
 						if err3c != nil {
@@ -237,6 +301,14 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Collect all yt-dlp logs for debugging
+	var ytdlpLogs []string
+	var allOutputs [][]byte
+	if err != nil {
+		ytdlpLogs = append(ytdlpLogs, fmt.Sprintf("yt-dlp attempt1 (web) failed: %v; output: %s", err, string(outBytes)))
+		allOutputs = append(allOutputs, outBytes)
+	}
+
 	// Determine produced file. We expect mp3 with base.mp3
 	if _, err := os.Stat(outPath); err != nil {
 		// try to find any produced file
@@ -250,7 +322,26 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 		}
 		if found == "" {
 			log.Printf("YouTube transcribe: audio not found after yt-dlp, base=%s", base)
-			JSONError(w, http.StatusInternalServerError, "Audio file not found after download")
+			// Collect all previous logs
+			// This is a bit manual, but will capture the flow for debugging
+			// The `err` variable holds the last error in the chain
+			finalErrorDetails := strings.Join(ytdlpLogs, "\n")
+
+			// Check if this is an authentication error from any attempt
+			isAuth := false
+			for _, output := range allOutputs {
+				if isAuthError(output) {
+					isAuth = true
+					break
+				}
+			}
+			if isAuth {
+				JSONErrorWithDetails(w, http.StatusForbidden,
+					"YouTube requires authentication. Please ensure cookies are properly configured.",
+					"This video requires sign-in to access. The server needs valid YouTube cookies to download age-restricted or private content.\n\nDetails:\n"+finalErrorDetails)
+			} else {
+				JSONErrorWithDetails(w, http.StatusInternalServerError, "Audio file not found after download", finalErrorDetails)
+			}
 			return
 		}
 		outPath = found
@@ -262,7 +353,12 @@ func handleTranscribeYouTube(w http.ResponseWriter, r *http.Request) {
 	if info != nil {
 		log.Printf("YouTube transcribe: downloaded file=%s size=%d bytes", outPath, info.Size())
 	}
-	text, err := transcribeLongAudio(outPath, body.Language)
+	// Convert "auto" to empty string for OpenAI Whisper API
+	language := body.Language
+	if language == "auto" {
+		language = ""
+	}
+	text, err := transcribeLongAudio(outPath, language)
 	if err != nil {
 		log.Printf("YouTube segmented transcription error: %v", err)
 		JSONErrorWithDetails(w, http.StatusInternalServerError, "Transcription failed", err.Error())
@@ -1387,13 +1483,14 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	// Optional HOST (defaults to 0.0.0.0 via ":port")
+
 	host := os.Getenv("HOST")
-	addr := ":" + port
-	if host != "" {
-		addr = host + ":" + port
+	// В контейнере Cloud Run всегда форсим 0.0.0.0
+	if host == "" || host == "localhost" || host == "127.0.0.1" {
+		host = "0.0.0.0"
 	}
 
+	addr := host + ":" + port
 	fmt.Printf("🚀 SpeakApper Backend listening on %s\n", addr)
 	log.Fatal(http.ListenAndServe(addr, handler))
 }
